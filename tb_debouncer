@@ -1,48 +1,40 @@
 `timescale 1ns/1ps
 module tb_debouncer;
   reg  clk = 0;
-  reg  reset = 1;         // external active-low
+  reg  reset = 1;         
   reg  button_in = 0;
   wire button_out;
 
-  // Small threshold for quick sim
+ 
   debouncer #(.DEBOUNCE_MAX(6)) dut (
     .clk(clk), .reset(reset), .button_in(button_in), .button_out(button_out)
   );
 
-  // 100 MHz clock (10 ns period)
   always #5 clk = ~clk;
 
-  // Helper: cause a 1->0 edge of reset that will be *sampled* at next negedge
   task reset_falling_edge_once;
   begin
-    // Make the 1->0 happen sometime between negedges so it is seen next negedge
-    @(posedge clk); reset = 0;   // drive low
-    @(posedge clk); reset = 1;   // back high (length isn't critical; we key off 1->0 only)
+    @(posedge clk); reset = 0;   
+    @(posedge clk); reset = 1;  
   end
   endtask
 
   initial begin
-    // Start with a clean environment
-    // Give one reset fall so internals initialize deterministically
+   
     reset_falling_edge_once();
 
-    // Wait a bit, then press and hold the button
     repeat (3) @(negedge clk);
     button_in = 1;
 
-    // While held, keep issuing reset falling edges to prove the counter zeroes each time
-    // Each call below inserts another 1->0 on 'reset' -> counter returns to 0 on that negedge
+   
     reset_falling_edge_once();  // counter cleared here
     repeat (2) @(negedge clk);
     reset_falling_edge_once();  // cleared again
     repeat (3) @(negedge clk);
     reset_falling_edge_once();  // cleared again
 
-    // Now stop resetting; after 6 negedges, we should see ONE pulse on button_out
     repeat (8) @(negedge clk);
 
-    // Release button
     button_in = 0;
     repeat (8) @(negedge clk);
 
