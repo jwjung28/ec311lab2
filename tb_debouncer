@@ -1,60 +1,69 @@
+// -----------------------------------------------------------------------------
+// tb_debouncer.v  (Vivado 2024/xsim-friendly)
+// - Only signals on the waveform: clk, reset, button_in, button_out
+// - Clock period = 6 (toggle every 3)
+// - Multiple falling edges on reset to prove async negedge reset behavior
+// - Generates quick "bounce" followed by a sustained press
+// -----------------------------------------------------------------------------
 `timescale 1ns/1ps
 module tb_debouncer;
+    // --- Waveform-visible signals ---
+    reg  clk        = 1'b0;
+    reg  reset      = 1'b1;   // start deasserted (active-low)
+    reg  button_in  = 1'b0;
+    wire button_out;
 
-  // --- Waveform signals (only these four) ---
-  reg  clk        = 0;
-  reg  reset      = 1;   // active-low external reset
-  reg  button_in  = 0;
-  wire button_out;
+    // Clock: period = 6 (toggle every 3)
+    localparam int HALF = 3;
+    always #(HALF) clk = ~clk;
 
-  // Small threshold so it’s easy to see in sim
-  debouncer #(.DEBOUNCE_MAX(6)) dut (
-    .clk(clk),
-    .reset(reset),
-    .button_in(button_in),
-    .button_out(button_out)
-  );
+    // DUT
+    debouncer #(.DEBOUNCE_MAX(4)) dut (
+        .clk(clk),
+        .reset(reset),
+        .button_in(button_in),
+        .button_out(button_out)
+    );
 
-  // 100 MHz clock
-  always #5 clk = ~clk;
+    // Reset pulses: several falling edges at different times
+    initial begin
+        // brief start-up
+        #2  reset = 1'b0;  // 1st falling edge (async clear)
+        #6  reset = 1'b1;
 
-  // Make a clean falling edge on reset (1 -> 0 -> 1).
-  // The DUT samples/acts on it at the next *negedge clk*.
-  task automatic reset_fall_once;
-  begin
-    @(posedge clk); reset = 0;   // create 1->0 fall
-    @(posedge clk); reset = 1;   // go back high (length doesn’t matter; we key off the fall)
-  end
-  endtask
+        #40 reset = 1'b0;  // 2nd falling edge
+        #6  reset = 1'b1;
 
-  initial begin
-    // 1) Initialization: one reset fall so DUT starts known
-    repeat (2) @(negedge clk);
-    reset_fall_once();
+        #80 reset = 1'b0;  // 3rd falling edge
+        #6  reset = 1'b1;
+    end
 
-    // 2) Press & hold the button
-    repeat (3) @(negedge clk);
-    button_in = 1;
+    // Button stimulus: quick bounce, sustained press, release; repeat around resets
+    initial begin
+        // Wait until first reset cycle completes
+        #20;
 
-    // 3) Fire multiple reset falling edges while held:
-    //    Each fall clears the counter, postponing the eventual pulse.
-    repeat (2) @(negedge clk);
-    reset_fall_once();           // reset fall #1
+        // Simulated contact bounce (too short to pass debounce)
+        button_in = 1; #6;  // 1 clock
+        button_in = 0; #6;  // release
+        button_in = 1; #6;  // 1 clock
+        button_in = 0; #12; // settle
 
-    repeat (3) @(negedge clk);
-    reset_fall_once();           // reset fall #2
+        // Sustained press long enough to pass debounce and emit 1-cycle pulse
+        button_in = 1; #(6*6); // 6 clocks (>= DEBOUNCE_MAX)
+        button_in = 0; #24;
 
-    repeat (1) @(negedge clk);
-    reset_fall_once();           // reset fall #3
+        // Another sustained press, this time straddling a reset pulse window
+        button_in = 1; #12;
+        // A reset falling edge will come later; keep holding
+        #(6*6);
+        button_in = 0; #24;
 
-    repeat (4) @(negedge clk);
-    reset_fall_once();           // reset fall #4
+        // Final quick press that is too short (should NOT pulse)
+        button_in = 1; #9;  // not an integer number of clocks; < DEBOUNCE_MAX high cycles
+        button_in = 0; #30;
 
-    // 4) Now stop resetting; after 6 negedges the debouncer should finally fire one pulse
-    repeat (8) @(negedge clk);
-
-    // 5) Release button, then show it works again with more reset falls and a new press
-    button_in = 0; repeat (6) @(negedge clk);
-
-    // Extra reset falls (shouldn’t produce pulses; just re-arm/clear counter)
-    reset
+        // End sim
+        #60 $finish;
+    end
+endmodule
