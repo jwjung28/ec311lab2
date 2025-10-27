@@ -1,0 +1,85 @@
+// -----------------------------------------------------------------------------
+// display_control
+// - Purpose: Time-multiplex 4 HEX digits onto 4 common-anode 7-seg displays
+// - Inputs:
+//     clk, reset_n (ACTIVE-LOW async)
+//     value [15:0]  -> {D3,D2,D1,D0} = {MSD ... LSD}, left→right on board
+// - Outputs:
+//     an[3:0]  active-LOW digit enables: scan order 1110→1101→1011→0111
+//     seg[6:0] active-LOW segments {CA,CB,CC,CD,CE,CF,CG}
+// - Params:
+//     CLK_HZ     : input clock frequency (default 100 MHz)
+//     DIGIT_HZ   : refresh rate per digit (default 1000 Hz ≈ 1 ms/digit)
+//                  Full frame refresh ≈ DIGIT_HZ / 4 (e.g., 250 Hz).
+// -----------------------------------------------------------------------------
+module display_control #(
+    parameter integer CLK_HZ   = 100_000_000,
+    parameter integer DIGIT_HZ = 1_000
+) (
+    input  wire        clk,
+    input  wire        reset_n,      // ACTIVE-LOW global reset
+    input  wire [15:0] value,        // {D3,D2,D1,D0} (hex digits)
+    output reg  [3:0]  an,           // active-LOW digit selects
+    output wire [6:0]  seg           // active-LOW segments {CA..CG}
+);
+
+    // -------------------------------------------------------------
+    // Clock divider: generate 1 "tick" per digit dwell (≈1 ms)
+    // -------------------------------------------------------------
+    localparam integer TICKS_PER_DIGIT = CLK_HZ / DIGIT_HZ;
+    localparam integer CTRW = $clog2(TICKS_PER_DIGIT);
+    reg [CTRW-1:0] div_ctr = {CTRW{1'b0}};
+    reg            tick    = 1'b0;
+
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            div_ctr <= {CTRW{1'b0}};
+            tick    <= 1'b0;
+        end else begin
+            if (div_ctr == TICKS_PER_DIGIT-1) begin
+                div_ctr <= {CTRW{1'b0}};
+                tick    <= 1'b1;
+            end else begin
+                div_ctr <= div_ctr + 1'b1;
+                tick    <= 1'b0;
+            end
+        end
+    end
+
+    // -------------------------------------------------------------
+    // Scan index 0..3 (rightmost to leftmost typical wiring)
+    // -------------------------------------------------------------
+    reg [1:0] scan = 2'd0;
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n)
+            scan <= 2'd0;
+        else if (tick)
+            scan <= scan + 2'd1;
+    end
+
+    // -------------------------------------------------------------
+    // Choose active digit and nibble synchronized with 'scan'
+    // an patterns (active-LOW): 1110, 1101, 1011, 0111
+    // Map scan=0→rightmost (D0), scan=1→D1, scan=2→D2, scan=3→leftmost (D3)
+    // -------------------------------------------------------------
+    reg [3:0] hex_digit;  // to decoder
+
+    always @* begin
+        case (scan)
+            2'd0: begin an = 4'b1110; hex_digit = value[3:0];   end // D0
+            2'd1: begin an = 4'b1101; hex_digit = value[7:4];   end // D1
+            2'd2: begin an = 4'b1011; hex_digit = value[11:8];  end // D2
+            2'd3: begin an = 4'b0111; hex_digit = value[15:12]; end // D3
+            default: begin an = 4'b1111; hex_digit = 4'h0; end
+        endcase
+    end
+
+    // -------------------------------------------------------------
+    // 7-seg decoder (active-LOW)
+    // -------------------------------------------------------------
+    seven_segment_decoder u_dec (
+        .hex_digit(hex_digit),
+        .seg(seg) // {CA,CB,CC,CD,CE,CF,CG}, active-LOW
+    );
+
+endmodule
