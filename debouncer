@@ -1,48 +1,62 @@
 `timescale 1ns/1ps
 module debouncer #(
-    parameter integer DEBOUNCE_MAX = 500_000   // # falling edges to confirm a change
+    parameter integer DEBOUNCE_MAX = 500_000  // # falling edges required to confirm a press
 )(
-    input  wire clk,          // global clock
-    input  wire reset,        // ACTIVE-LOW async reset
-    input  wire button_in,    // raw button
-    output reg  button_out    // 1-cycle pulse on debounced rising edge (negedge domain)
+    input  wire clk,         // global clock
+    input  wire reset,       // ACTIVE-LOW external reset (we react to 1->0 edges)
+    input  wire button_in,   // raw button
+    output reg  button_out   // 1-negedge pulse on confirmed press
 );
-    reg btn_s1, btn_s2;       // 2-flop synchronizer
-    reg stable;               // debounced level
-    reg stable_d;             // delayed debounced level for edge detect
-    reg [31:0] cnt;           // dwell counter
+    // --- detect EVERY falling edge of reset, in the negedge clock domain ---
+    reg rst_s0 = 1'b1, rst_s1 = 1'b1;
+    always @(negedge clk) begin
+        rst_s0 <= reset;     // current sampled level of external reset_n
+        rst_s1 <= rst_s0;    // 1-cycle delayed
+    end
+    wire rst_fall = (rst_s1 == 1'b1) && (rst_s0 == 1'b0);
 
-    always @(negedge clk or negedge reset) begin
-        if (!reset) begin
-            btn_s1     <= 1'b0;
-            btn_s2     <= 1'b0;
-            stable     <= 1'b0;
-            stable_d   <= 1'b0;
-            button_out <= 1'b0;
-            cnt        <= 32'd0;
+    // --- 2-flop sync for the button (still minimal, avoids metastability) ---
+    reg btn_s1 = 1'b0, btn_s2 = 1'b0;
+
+    // --- simple press logic: count while held HIGH once; fire once; re-arm on release ---
+    reg [31:0] cnt = 32'd0;
+    reg        armed = 1'b1;     // ready to detect a new press
+
+    localparam [31:0] DMAX = (DEBOUNCE_MAX < 1) ? 32'd1 : DEBOUNCE_MAX;
+
+    always @(negedge clk) begin
+        // sync the button first
+        btn_s1 <= button_in;
+        btn_s2 <= btn_s1;
+
+        // default output low; raise it only when we confirm a press
+        button_out <= 1'b0;
+
+        // on EVERY falling edge of reset: clear counter and re-arm
+        if (rst_fall) begin
+            cnt   <= 32'd0;
+            armed <= 1'b1;
         end else begin
-            // sync raw input
-            btn_s1 <= button_in;
-            btn_s2 <= btn_s1;
-
-            // debounce: count while input != stable; accept at MAX then clear
-            if (btn_s2 != stable) begin
-                if (cnt >= (DEBOUNCE_MAX - 1)) begin
-                    stable <= btn_s2;
-                    cnt    <= 32'd0;
-                end else begin
-                    cnt <= cnt + 32'd1;
-                end
+            if (btn_s2 == 1'b0) begin
+                // button released: clear counter and re-arm
+                cnt   <= 32'd0;
+                armed <= 1'b1;
             end else begin
-                cnt <= 32'd0;
+                // button held high
+                if (armed) begin
+                    if (cnt >= (DMAX - 1)) begin
+                        // confirmed press -> one pulse, disarm until release
+                        button_out <= 1'b1;
+                        armed      <= 1'b0;
+                        cnt        <= 32'd0;
+                    end else begin
+                        cnt <= cnt + 32'd1;
+                    end
+                end else begin
+                    // already fired for this hold; wait for release
+                    cnt <= 32'd0;
+                end
             end
-
-            // one-cycle pulse on debounced rising edge
-            stable_d <= stable;
-            if ((stable == 1'b1) && (stable_d == 1'b0))
-                button_out <= 1'b1;
-            else
-                button_out <= 1'b0;
         end
     end
 endmodule
