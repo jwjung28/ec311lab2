@@ -1,0 +1,61 @@
+// ======================= tb_top_part1.v =======================
+`timescale 1ns/1ps
+module tb_top_part1;
+  localparam real TNS  = 10.0;  // 100 MHz sim clock
+  localparam int  DMAX = 8;     // tiny debounce window for fast sim
+
+  reg  clk = 0;
+  reg  reset = 0;               // ACTIVE-LOW
+  reg  button_in = 0;
+  wire [7:0] count;
+
+  // DUT: override the debouncer window for quick simulation
+  top_part1 DUT (
+    .clk(clk), .reset(reset), .button_in(button_in), .count(count)
+  );
+  // Rebind parameter on the debouncer instance inside the DUT
+  // If your Vivado version doesn't support rebinds, instantiate debouncer directly in a sim-only top.
+  defparam DUT.u_db.DEBOUNCE_MAX = DMAX;
+
+  // clock
+  always #(TNS/2.0) clk = ~clk;
+
+  // helper
+  task cyc(input int n); begin repeat(n) @(posedge clk); end endtask
+
+  initial begin
+    $display("[%0t] tb_top_part1 start", $time);
+
+    // release reset
+    cyc(4); reset = 1; cyc(2);
+
+    // Press #1 (clean)
+    button_in = 1; cyc(DMAX + 4);
+    button_in = 0; cyc(5);
+    $display("After press #1: count=%0d (expect 1)", count);
+
+    // Press #2 (with bounce, then stable)
+    button_in = 1; cyc(2); button_in = 0; cyc(2);
+    button_in = 1; cyc(2); button_in = 0; cyc(2);
+    button_in = 1; cyc(DMAX + 3);  // stable long enough
+    button_in = 0; cyc(5);
+    $display("After press #2: count=%0d (expect 2)", count);
+
+    // Long hold (should not multi-count)
+    button_in = 1; cyc(DMAX + 20);
+    button_in = 0; cyc(5);
+    $display("After long hold: count=%0d (expect 3)", count);
+
+    // Async reset mid-run → back to 0
+    reset = 0; #(1); reset = 1; cyc(2);
+    $display("After reset: count=%0d (expect 0)", count);
+
+    // One more clean press
+    button_in = 1; cyc(DMAX + 4);
+    button_in = 0; cyc(5);
+    $display("After post-reset press: count=%0d (expect 1)", count);
+
+    $display("[%0t] tb_top_part1 done", $time);
+    cyc(5); $finish;
+  end
+endmodule
