@@ -2,8 +2,8 @@
 module top_part1 (
     input  wire        clk,
     input  wire        reset,       // ACTIVE-LOW global reset
-    input  wire        button_in,   // raw push-button
-    output wire [7:0]  count        // drive LEDs (binary)
+    input  wire        increment,   // raw push-button (was: button_in)
+    output wire [7:0]  count
 );
     wire increment_pulse;
 
@@ -12,11 +12,11 @@ module top_part1 (
     u_db (
         .clk(clk),
         .reset(reset),
-        .button_in(button_in),
+        .button_in(increment),      // renamed hookup
         .button_out(increment_pulse)
     );
 
-    // 8-bit counter: increments on pulse
+    // 8-bit counter
     counter u_cnt (
         .clk(clk),
         .reset(reset),
