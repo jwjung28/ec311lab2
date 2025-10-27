@@ -1,36 +1,60 @@
 `timescale 1ns/1ps
-module tb_debouncer_min;
-  reg  clk = 0;
-  reg  reset = 0;        // start held in reset (active-low)
-  reg  button_in = 0;
+module tb_debouncer;
+
+  // --- Waveform signals (only these four) ---
+  reg  clk        = 0;
+  reg  reset      = 1;   // active-low external reset
+  reg  button_in  = 0;
   wire button_out;
 
-  // Small MAX so you can see it quickly in sim
+  // Small threshold so it’s easy to see in sim
   debouncer #(.DEBOUNCE_MAX(6)) dut (
-    .clk(clk), .reset(reset), .button_in(button_in), .button_out(button_out)
+    .clk(clk),
+    .reset(reset),
+    .button_in(button_in),
+    .button_out(button_out)
   );
 
   // 100 MHz clock
   always #5 clk = ~clk;
 
-  initial begin
-    // release reset cleanly
-    repeat (3) @(posedge clk);
-    reset = 1;
-
-    // brief noise (should NOT produce button_out)
-    button_in = 1; @(posedge clk);
-    button_in = 0; @(posedge clk);
-    button_in = 1; @(posedge clk);
-    button_in = 0; repeat (3) @(posedge clk);
-
-    // clean press: hold high >= DEBOUNCE_MAX cycles -> expect ONE pulse on button_out
-    button_in = 1; repeat (10) @(posedge clk);
-
-    // clean release (button_out won’t pulse on release; it’s only on rising edge)
-    button_in = 0; repeat (10) @(posedge clk);
-
-    $finish;
+  // Make a clean falling edge on reset (1 -> 0 -> 1).
+  // The DUT samples/acts on it at the next *negedge clk*.
+  task automatic reset_fall_once;
+  begin
+    @(posedge clk); reset = 0;   // create 1->0 fall
+    @(posedge clk); reset = 1;   // go back high (length doesn’t matter; we key off the fall)
   end
-endmodule
+  endtask
 
+  initial begin
+    // 1) Initialization: one reset fall so DUT starts known
+    repeat (2) @(negedge clk);
+    reset_fall_once();
+
+    // 2) Press & hold the button
+    repeat (3) @(negedge clk);
+    button_in = 1;
+
+    // 3) Fire multiple reset falling edges while held:
+    //    Each fall clears the counter, postponing the eventual pulse.
+    repeat (2) @(negedge clk);
+    reset_fall_once();           // reset fall #1
+
+    repeat (3) @(negedge clk);
+    reset_fall_once();           // reset fall #2
+
+    repeat (1) @(negedge clk);
+    reset_fall_once();           // reset fall #3
+
+    repeat (4) @(negedge clk);
+    reset_fall_once();           // reset fall #4
+
+    // 4) Now stop resetting; after 6 negedges the debouncer should finally fire one pulse
+    repeat (8) @(negedge clk);
+
+    // 5) Release button, then show it works again with more reset falls and a new press
+    button_in = 0; repeat (6) @(negedge clk);
+
+    // Extra reset falls (shouldn’t produce pulses; just re-arm/clear counter)
+    reset
