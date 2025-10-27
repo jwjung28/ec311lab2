@@ -1,26 +1,17 @@
 `timescale 1ns/1ps
 
 module tb_debouncer;
-  // 100 MHz clock, ACTIVE-LOW reset
   localparam real  TNS = 10.0;
-  localparam int   DMAX = 8;   // small window for quick sim
-
+  localparam int   DMAX = 8;   
   reg  clk = 0, reset = 0, button_in = 0;
   wire button_out;
-
-  // DUT
   debouncer #(.DEBOUNCE_MAX(DMAX)) DUT (
     .clk(clk), .reset(reset), .button_in(button_in), .button_out(button_out)
   );
-
-  // Clock
   always #(TNS/2.0) clk = ~clk;
-
-  // Count output pulses
   integer pulses = 0;
   always @(posedge clk) if (button_out) pulses <= pulses + 1;
 
-  // Tiny helpers
   task cyc(input int n); begin repeat(n) @(posedge clk); end endtask
   task chk(input int exp, input [127:0] tag);
     begin
@@ -32,39 +23,30 @@ module tb_debouncer;
 
   initial begin
     $display("[%0t] tb start", $time);
-    // reset low -> release
     cyc(5); reset = 1; cyc(5);
 
-    // T0 idle
     cyc(20); chk(0, "T0 idle");
 
-    // T1 short/noisy (< DMAX) -> no pulse
-    // bounce 3 quick toggles, end LOW
     repeat (3) begin button_in = ~button_in; cyc(1); end
     button_in = 0; cyc(10);
     chk(0, "T1 short/noisy");
 
-    // T2 bouncy press then stable HIGH >= DMAX -> one pulse
     repeat (4) begin button_in = ~button_in; cyc(1); end
-    button_in = 1; cyc(DMAX + 3);  // stable high long enough
-    cyc(10);                       // hold; no extra pulses
-    button_in = 0; cyc(10);        // release
+    button_in = 1; cyc(DMAX + 3); 
+    cyc(10);                     
+    button_in = 0; cyc(10);     
     chk(1, "T2 single confirmed press");
-
-    // T3 fast double-tap (gap < DMAX) -> still one total
-    button_in = 1; cyc(DMAX + 2);  // valid press
-    button_in = 0; cyc(3);         // too-short gap
-    button_in = 1; cyc(DMAX - 2);  // second "press" below window
+    button_in = 1; cyc(DMAX + 2);
+    button_in = 0; cyc(3);      
+    button_in = 1; cyc(DMAX - 2);
     button_in = 0; cyc(10);
     chk(1, "T3 fast double-tap filtered");
 
-    // T4 long hold then mid-press reset (active-low)
-    button_in = 1; cyc(DMAX + 10); // should have produced exactly 1 so far
-    reset = 0; cyc(3); reset = 1;  // async clear while held
+    button_in = 1; cyc(DMAX + 10); 
+    reset = 0; cyc(3); reset = 1;
     cyc(5); button_in = 0; cyc(10);
     chk(1, "T4 reset during hold (no extra)");
 
-    // T5 clean press/release separated by enough time -> one pulse
     button_in = 1; cyc(DMAX + 5);
     button_in = 0; cyc(DMAX + 5);
     chk(1, "T5 clean press/release");
