@@ -1,0 +1,26 @@
+// ======================= top_part1.v =======================
+module top_part1 (
+    input  wire        clk,
+    input  wire        reset,       // ACTIVE-LOW global reset
+    input  wire        button_in,   // raw push-button
+    output wire [7:0]  count        // drive LEDs (binary)
+);
+    wire increment_pulse;
+
+    // Debouncer: 1-cycle pulse per confirmed press
+    debouncer #(.DEBOUNCE_MAX(500_000))  // ~5 ms @ 100 MHz (tune for your board)
+    u_db (
+        .clk(clk),
+        .reset(reset),
+        .button_in(button_in),
+        .button_out(increment_pulse)
+    );
+
+    // 8-bit counter: increments on pulse
+    counter u_cnt (
+        .clk(clk),
+        .reset(reset),
+        .increment(increment_pulse),
+        .count(count)
+    );
+endmodule
