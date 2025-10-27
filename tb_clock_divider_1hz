@@ -1,0 +1,58 @@
+`timescale 1ns/1ps
+
+module tb_clock_divider_1hz;
+  localparam real TNS = 10.0;  // 100 MHz-like sim clock (10 ns period)
+
+  reg  clk = 0;
+  reg  reset_n = 0;            // ACTIVE-LOW
+  wire clk_1hz;
+
+  // 100 MHz sim clock
+  always #(TNS/2.0) clk = ~clk;
+
+  // DUT (SIM VERSION)
+  clock_divider_1hz_sim DUT (
+    .clk(clk),
+    .reset_n(reset_n),
+    .clk_1hz(clk_1hz)
+  );
+
+  integer hi_cycles, lo_cycles, ok_cnt, i;
+  reg prev;
+
+  initial begin
+    $display("[%0t] tb_clock_divider_1hz: start", $time);
+
+    // release reset
+    repeat (3) @(posedge clk);
+    reset_n = 1;
+    repeat (1) @(posedge clk);
+
+    ok_cnt = 0;
+
+    // measure 5 full periods: expect LOW=5, HIGH=5 cycles
+    for (i = 0; i < 5; i = i + 1) begin
+      prev = clk_1hz;
+
+      // count until first toggle
+      lo_cycles = 0;
+      while (clk_1hz == prev) begin @(posedge clk); lo_cycles = lo_cycles + 1; end
+
+      prev = clk_1hz;
+      hi_cycles = 0;
+      while (clk_1hz == prev) begin @(posedge clk); hi_cycles = hi_cycles + 1; end
+
+      if (lo_cycles == 5 && hi_cycles == 5) begin
+        ok_cnt = ok_cnt + 1;
+        $display("OK %0d: LOW=%0d HIGH=%0d (exp 5/5)", i, lo_cycles, hi_cycles);
+      end else begin
+        $display("MISMATCH %0d: LOW=%0d HIGH=%0d (exp 5/5)", i, lo_cycles, hi_cycles);
+      end
+    end
+
+    if (ok_cnt == 5) $display("PASS: 1Hz divider timing correct (sim).");
+    else             $display("FAIL: %0d/5 periods correct.", ok_cnt);
+
+    #50 $finish;
+  end
+endmodule
