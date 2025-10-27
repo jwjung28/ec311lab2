@@ -1,54 +1,76 @@
 `timescale 1ns/1ps
 module tb_counter16;
-  localparam real TNS = 10.0;   // 100 MHz
+  // 100 MHz clock
+  localparam real TNS = 10.0;
 
   reg  clk = 0;
   reg  reset = 0;               // ACTIVE-LOW
   reg  increment = 0;
   wire [15:0] count;
 
-  // DUT (use counter16; or swap to counter_n #(.WIDTH(16)) if you used the param version)
   counter16 DUT (.clk(clk), .reset(reset), .increment(increment), .count(count));
 
   // clock
   always #(TNS/2.0) clk = ~clk;
 
-  // helper: wait N cycles
-  task cyc(input int n); begin repeat(n) @(posedge clk); end endtask
+  // helpers
+  task cyc(input int n); begin repeat(n) @(posedge clk); end endtask;
+  task pulse(input int n); begin increment = 1; cyc(n); increment = 0; end endtask;
 
   initial begin
-    $display("[%0t] start", $time);
+    $display("[%0t] start tb_counter16", $time);
 
-    // hold in reset (low), then release (high)
-    cyc(3); reset = 1; cyc(2);
-
-    // T0: idle, no increment → count stays 0
+    // Hold in reset (low), verify count stays 0 while reset held
+    cyc(3);
+    if (count !== 16'h0000) $display("FAIL: count not 0 during reset (got %h)", count);
     cyc(5);
-    $display("T0: count=%0d (0x%h)  expect 0", count, count);
+    if (count !== 16'h0000) $display("FAIL: count changed during reset (got %h)", count);
 
-    // T1: single pulse → +1
-    increment = 1; cyc(1); increment = 0; cyc(2);
-    $display("T1: count=%0d (0x%h)  expect 1", count, count);
+    // Release reset
+    reset = 1; cyc(2);
+    if (count !== 16'h0000) $display("FAIL: count not 0 after reset release (got %h)", count);
 
-    // T2: hold high 5 cycles → +5 (total 6)
-    increment = 1; cyc(5); increment = 0; cyc(1);
-    $display("T2: count=%0d (0x%h)  expect 6", count, count);
+    // Idle no-increment
+    cyc(5);
+    if (count !== 16'h0000) $display("FAIL: count changed while increment=0 (got %h)", count);
 
-    // T3: async reset while running → back to 0
-    reset = 0; #(1);   // assert low asynchronously
+    // Single pulse -> +1
+    pulse(1); cyc(1);
+    if (count !== 16'h0001) $display("FAIL: single pulse expected 0001, got %h", count);
+
+    // Sustained high 5 cycles -> +5 (total 6)
+    pulse(5); cyc(1);
+    if (count !== 16'h0006) $display("FAIL: sustained 5 expected 0006, got %h", count);
+
+    // Async reset while running
+    increment = 1; cyc(2);
+    reset = 0; #1; increment = 0; cyc(1); reset = 1; cyc(1);
+    if (count !== 16'h0000) $display("FAIL: async reset expected 0000, got %h", count);
+
+    // Two more pulses -> 2
+    pulse(1); cyc(1); pulse(1); cyc(1);
+    if (count !== 16'h0002) $display("FAIL: expected 0002, got %h", count);
+
+    // ---------- NEW: WRAPAROUND ----------
+    // Fast-forward to 0xFFFE
+    integer i;
+    for (i = 0; i < 16'hFFFE; i = i + 1) begin
+      pulse(1);
+    end
+    if (count !== 16'hFFFE) $display("FAIL: fast-forward expected FFFE, got %h", count);
+
+    // Next pulse -> FFFF
+    pulse(1); if (count !== 16'hFFFF) $display("FAIL: expected FFFF, got %h", count);
+
+    // Next pulse -> 0000 (wrap)
+    pulse(1); if (count !== 16'h0000) $display("FAIL: wrap expected 0000, got %h", count);
+    else $display("PASS: wrap FFFF -> 0000");
+
+    // Verify no count while reset held again
+    reset = 0; cyc(5); if (count !== 16'h0000) $display("FAIL: changed during reset (got %h)", count);
     reset = 1; cyc(1);
-    $display("T3: count=%0d (0x%h)  expect 0", count, count);
 
-    // T4: a couple more pulses → +2
-    increment = 1; cyc(1); increment = 0; cyc(1);
-    increment = 1; cyc(1); increment = 0; cyc(1);
-    $display("T4: count=%0d (0x%h)  expect 2", count, count);
-
-    // T5: longer burst (100 cycles) → +100 (total 102)
-    increment = 1; cyc(100); increment = 0; cyc(1);
-    $display("T5: count=%0d (0x%h)  expect 102 (0x0066)", count, count);
-
-    $display("[%0t] done", $time);
+    $display("[%0t] done tb_counter16", $time);
     cyc(2); $finish;
   end
 endmodule
