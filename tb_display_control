@@ -1,0 +1,46 @@
+`timescale 1ns/1ps
+module tb_display_control;
+  // Use a small "clock" and higher digit rate for quick sim
+  localparam int CLK_HZ_SIM   = 1_000_000; // 1 MHz
+  localparam int DIGIT_HZ_SIM = 10_000;    // 10 kHz per digit (fast for sim)
+  localparam real TNS = 1_000_000_000.0 / CLK_HZ_SIM; // ns per cycle
+
+  reg  clk = 0;
+  reg  reset_n = 0; // ACTIVE-LOW
+  reg  [15:0] value;
+  wire [3:0]  an;
+  wire [6:0]  seg;
+
+  // clock
+  always #(TNS/2.0) clk = ~clk;
+
+  // DUT with sim params
+  display_control #(
+    .CLK_HZ(CLK_HZ_SIM),
+    .DIGIT_HZ(DIGIT_HZ_SIM)
+  ) DUT (
+    .clk(clk),
+    .reset_n(reset_n),
+    .value(value),
+    .an(an),
+    .seg(seg)
+  );
+
+  // Simple stimulus: show 0xFACE then 0x1234
+  initial begin
+    $display("[%0t] start", $time);
+    value   = 16'hFACE;
+    reset_n = 0;
+    repeat (5) @(posedge clk);
+    reset_n = 1;
+
+    // watch a few scan cycles
+    repeat (200) @(posedge clk);
+
+    value = 16'h1234;
+    repeat (200) @(posedge clk);
+
+    $display("[%0t] done", $time);
+    $finish;
+  end
+endmodule
