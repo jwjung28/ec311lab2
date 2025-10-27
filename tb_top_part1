@@ -1,4 +1,4 @@
-// ======================= tb_top_part1.v =======================
+// ======================= tb_top_part1.sv =======================
 `timescale 1ns/1ps
 module tb_top_part1;
   localparam real TNS  = 10.0;  // 100 MHz sim clock
@@ -6,14 +6,13 @@ module tb_top_part1;
 
   reg  clk = 0;
   reg  reset = 0;               // ACTIVE-LOW
-  reg  increment = 0;           // was: button_in
+  reg  increment = 0;
   wire [7:0] count;
 
-  // DUT
-  top_part1 DUT (.clk(clk), .reset(reset), .increment(increment), .count(count));
-
-  // Shrink debounce for sim (use defparam if allowed)
-  defparam DUT.u_db.DEBOUNCE_MAX = DMAX;
+  // DUT: pass the small debounce window via parameter
+  top_part1 #(.DEBOUNCE_MAX(DMAX)) DUT (
+    .clk(clk), .reset(reset), .increment(increment), .count(count)
+  );
 
   // clock
   always #(TNS/2.0) clk = ~clk;
