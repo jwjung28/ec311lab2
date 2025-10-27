@@ -1,69 +1,73 @@
 // -----------------------------------------------------------------------------
-// tb_debouncer.v  (Vivado 2024/xsim-friendly)
-// - Only signals on the waveform: clk, reset, button_in, button_out
+// tb_debouncer.v  (Vivado 2024 / xsim friendly)
+// - Only waveform signals: clk, reset, button_in, button_out
 // - Clock period = 6 (toggle every 3)
-// - Multiple falling edges on reset to prove async negedge reset behavior
-// - Generates quick "bounce" followed by a sustained press
+// - Multiple falling edges on reset to show async clear
+// - Includes short "bounce" (no pulse) and sustained press (pulse)
 // -----------------------------------------------------------------------------
 `timescale 1ns/1ps
 module tb_debouncer;
-    // --- Waveform-visible signals ---
-    reg  clk        = 1'b0;
-    reg  reset      = 1'b1;   // start deasserted (active-low)
-    reg  button_in  = 1'b0;
+
+    // Waveform-visible signals
+    reg  clk       = 1'b0;
+    reg  reset     = 1'b1;   // active-low; start deasserted then pulse low
+    reg  button_in = 1'b0;
     wire button_out;
 
-    // Clock: period = 6 (toggle every 3)
-    localparam integer HALF = 3;
-    always #(HALF) clk = ~clk;
+    // 6-unit clock period (toggle every 3)
+    always #3 clk = ~clk;
 
     // DUT
-    debouncer #(.DEBOUNCE_MAX(4)) dut (
+    debouncer #(
+        .CNT_W(8),
+        .DEBOUNCE_MAX(4)   // small for sim; requires 4 clocks high
+    ) dut (
         .clk(clk),
         .reset(reset),
         .button_in(button_in),
         .button_out(button_out)
     );
 
-    // Reset pulses: several falling edges at different times
+    // Generate several falling-edge resets
     initial begin
-        // brief start-up
-        #2  reset = 1'b0;  // 1st falling edge (async clear)
+        // 1st falling edge (async reset)
+        #2  reset = 1'b0;
         #6  reset = 1'b1;
 
-        #40 reset = 1'b0;  // 2nd falling edge
+        // 2nd falling edge
+        #40 reset = 1'b0;
         #6  reset = 1'b1;
 
-        #80 reset = 1'b0;  // 3rd falling edge
+        // 3rd falling edge
+        #80 reset = 1'b0;
         #6  reset = 1'b1;
     end
 
-    // Button stimulus: quick bounce, sustained press, release; repeat around resets
+    // Button stimulus
     initial begin
-        // Wait until first reset cycle completes
+        // Wait a bit after first reset
         #20;
 
-        // Simulated contact bounce (too short to pass debounce)
-        button_in = 1; #6;  // 1 clock
-        button_in = 0; #6;  // release
-        button_in = 1; #6;  // 1 clock
-        button_in = 0; #12; // settle
+        // Quick "bounce" (too short, should NOT create a pulse)
+        button_in = 1; #6;    // 1 clock high
+        button_in = 0; #6;
+        button_in = 1; #6;    // another short blip
+        button_in = 0; #12;
 
-        // Sustained press long enough to pass debounce and emit 1-cycle pulse
-        button_in = 1; #(6*6); // 6 clocks (>= DEBOUNCE_MAX)
+        // Sustained press (>= DEBOUNCE_MAX clocks) -> expect 1 pulse
+        button_in = 1; #(6*6);   // 6 clocks high
         button_in = 0; #24;
 
-        // Another sustained press, this time straddling a reset pulse window
+        // Hold across time where another reset will happen later
         button_in = 1; #12;
-        // A reset falling edge will come later; keep holding
         #(6*6);
         button_in = 0; #24;
 
-        // Final quick press that is too short (should NOT pulse)
-        button_in = 1; #9;  // not an integer number of clocks; < DEBOUNCE_MAX high cycles
+        // Final quick press (too short) -> no pulse
+        button_in = 1; #9;    // < 4 clocks high
         button_in = 0; #30;
 
-        // End sim
         #60 $finish;
     end
+
 endmodule
