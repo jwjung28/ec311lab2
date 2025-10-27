@@ -1,9 +1,9 @@
 `timescale 1ns/1ps
 module tb_display_control;
-  // Use a small "clock" and higher digit rate for quick sim
-  localparam int CLK_HZ_SIM   = 1_000_000; // 1 MHz
-  localparam int DIGIT_HZ_SIM = 10_000;    // 10 kHz per digit (fast for sim)
-  localparam real TNS = 1_000_000_000.0 / CLK_HZ_SIM; // ns per cycle
+  // Sim params: small clock & fast digit scan for quick checks
+  localparam int  CLK_HZ_SIM   = 1_000_000; // 1 MHz
+  localparam int  DIGIT_HZ_SIM = 10_000;    // 10 kHz per digit (fast)
+  localparam real TNS          = 1_000_000_000.0 / CLK_HZ_SIM;
 
   reg  clk = 0;
   reg  reset_n = 0; // ACTIVE-LOW
@@ -14,7 +14,7 @@ module tb_display_control;
   // clock
   always #(TNS/2.0) clk = ~clk;
 
-  // DUT with sim params
+  // DUT (monolithic display_control that internally decodes to seg)
   display_control #(
     .CLK_HZ(CLK_HZ_SIM),
     .DIGIT_HZ(DIGIT_HZ_SIM)
@@ -26,21 +26,75 @@ module tb_display_control;
     .seg(seg)
   );
 
-  // Simple stimulus: show 0xFACE then 0x1234
+  // Expected 7-seg map (active-LOW, CA..CG)
+  function automatic [6:0] exp_seg(input [3:0] d);
+    case (d)
+      4'h0: exp_seg = 7'b0000001; 4'h1: exp_seg = 7'b1001111;
+      4'h2: exp_seg = 7'b0010010; 4'h3: exp_seg = 7'b0000110;
+      4'h4: exp_seg = 7'b1001100; 4'h5: exp_seg = 7'b0100100;
+      4'h6: exp_seg = 7'b0100000; 4'h7: exp_seg = 7'b0001111;
+      4'h8: exp_seg = 7'b0000000; 4'h9: exp_seg = 7'b0000100;
+      4'hA: exp_seg = 7'b0001000; 4'hB: exp_seg = 7'b1100000;
+      4'hC: exp_seg = 7'b0110001; 4'hD: exp_seg = 7'b1000010;
+      4'hE: exp_seg = 7'b0110000; 4'hF: exp_seg = 7'b0111000;
+      default: exp_seg = 7'b1111111;
+    endcase
+  endfunction
+
+  // Small helper to pull nibble expected for current an state
+  function automatic [3:0] nib_for_an(input [3:0] an_bits, input [15:0] val);
+    case (an_bits)
+      4'b1110: nib_for_an = val[3:0];    // D0 (rightmost)
+      4'b1101: nib_for_an = val[7:4];    // D1
+      4'b1011: nib_for_an = val[11:8];   // D2
+      4'b0111: nib_for_an = val[15:12];  // D3 (leftmost)
+      default: nib_for_an = 4'hx;
+    endcase
+  endfunction
+
+  // Track scan order correctness
+  reg [3:0] last_an;
+  integer   scan_errors = 0, seg_errors = 0, k;
+
   initial begin
-    $display("[%0t] start", $time);
-    value   = 16'hFACE;
-    reset_n = 0;
-    repeat (5) @(posedge clk);
+    $display("[%0t] start tb_display_control", $time);
+    value   = 16'h1234;
+    reset_n = 0; repeat (10) @(posedge clk);
     reset_n = 1;
 
-    // watch a few scan cycles
-    repeat (200) @(posedge clk);
+    // Observe many ticks and assert scan order + seg mapping
+    for (k = 0; k < 1000; k = k + 1) begin
+      @(posedge clk);
+      // Assert active-LOW an values occur only in the 4 legal patterns
+      if (!(an==4'b1110 || an==4'b1101 || an==4'b1011 || an==4'b0111 || an==4'b1111)) begin
+        scan_errors = scan_errors + 1;
+        $display("FAIL scan: illegal an=%b at t=%0t", an, $time);
+      end
 
-    value = 16'h1234;
-    repeat (200) @(posedge clk);
+      // Check scan order transitions (allow occasional 1111 if you add blanking)
+      if (last_an !== 4'bx && an !== 4'b1111) begin
+        case (last_an)
+          4'b1110: if (an !== 4'b1101) begin scan_errors++; $display("FAIL scan order 1110->%b", an); end
+          4'b1101: if (an !== 4'b1011) begin scan_errors++; $display("FAIL scan order 1101->%b", an); end
+          4'b1011: if (an !== 4'b0111) begin scan_errors++; $display("FAIL scan order 1011->%b", an); end
+          4'b0111: if (an !== 4'b1110) begin scan_errors++; $display("FAIL scan order 0111->%b", an); end
+        endcase
+      end
+      if (an !== 4'b1111) last_an = an;
 
-    $display("[%0t] done", $time);
+      // Check seg mapping for current nibble
+      if (an==4'b1110 || an==4'b1101 || an==4'b1011 || an==4'b0111) begin
+        automatic [3:0] nib = nib_for_an(an, value);
+        automatic [6:0] ex  = exp_seg(nib);
+        if (seg !== ex) begin
+          seg_errors = seg_errors + 1;
+          $display("FAIL seg: an=%b nib=%h seg=%b exp=%b @%0t", an, nib, seg, ex, $time);
+        end
+      end
+    end
+
+    if (scan_errors==0 && seg_errors==0) $display("PASS: display_control scan+seg assertions OK");
+    else $display("DONE with %0d scan errs, %0d seg errs", scan_errors, seg_errors);
     $finish;
   end
 endmodule
