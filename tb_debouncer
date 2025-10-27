@@ -14,7 +14,7 @@ module tb_debouncer;
     wire button_out;
 
     // Clock: period = 6 (toggle every 3)
-    localparam int HALF = 3;
+    localparam integer HALF = 3;
     always #(HALF) clk = ~clk;
 
     // DUT
