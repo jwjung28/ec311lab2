@@ -1,79 +1,83 @@
 // ============================================================================
-// TOP: Part 2
-// - Instantiates: clock_divider_1hz, clock_divider_1khz, counter16,
-//                 display_control_scan, seven_segment_decoder, debouncer
-// - Notes:
-//   * reset_n is GLOBAL ACTIVE-LOW and fans into all modules.
-//   * SW0=0 → auto count at 1 Hz; SW0=1 → manual count via debounced button.
-//   * AN lines are active-LOW; seg outputs are active-LOW {CA..CG}.
+// TOP: Part 2 (schematic-accurate)
+// - Uses: clock_divider_1hz, clock_divider_1khz, debouncer (lab spec),
+//         counter16, display_control_scan, seven_segment_decoder
+// - Global reset is ACTIVE-LOW and fans into all blocks.
+// - One counter; a MUX selects increment source (manual vs 1Hz auto pulse).
 // ============================================================================
 
 module top_part2 (
     input  wire        clk_100mhz,
-    input  wire        reset_n,     // GLOBAL ACTIVE-LOW reset (debounce externally if needed)
-    input  wire        btn_inc,     // pushbutton for manual increment (if SW0=1)
-    input  wire        sw_mode,     // SW0: 0=auto 1Hz, 1=manual button
-    output wire [3:0]  an,          // active-LOW digit enables: AN3..AN0
-    output wire [6:0]  seg          // active-LOW segments {CA,CB,CC,CD,CE,CF,CG}
+    input  wire        reset_n,     // GLOBAL ACTIVE-LOW reset
+    input  wire        btn_inc,     // pushbutton (increment)
+    input  wire        mode_select, // 0 = AUTO (1 Hz), 1 = MANUAL (button)
+    output wire [3:0]  an,          // active-LOW digit selects AN3..AN0
+    output wire [6:0]  seg          // active-LOW {CA,CB,CC,CD,CE,CF,CG}
 );
 
-    // --------------------------
-    // Derived clocks
-    // --------------------------
-    wire clk_1hz, clk_1khz;
-    clock_divider_1hz  u_div1 (.clk(clk_100mhz), .reset_n(reset_n), .clk_1hz(clk_1hz));
-    clock_divider_1khz u_div2 (.clk(clk_100mhz), .reset_n(reset_n), .clk_1khz(clk_1khz));
+    // ------------------------------------------------------------------------
+    // Clock dividers
+    //   - 1 kHz: display scan
+    //   - 1  Hz: auto-increment source (we'll edge-detect it into a 100 MHz pulse)
+    // ------------------------------------------------------------------------
+    wire clk_1khz, clk_1hz;
+    clock_divider_1khz u_div_khz (.clk(clk_100mhz), .reset_n(reset_n), .clk_1khz(clk_1khz));
+    clock_divider_1hz  u_div_hz  (.clk(clk_100mhz), .reset_n(reset_n), .clk_1hz (clk_1hz));
 
-    // --------------------------
-    // Debounce manual increment button (sync to 100 MHz)
-    // Produces a 1-cycle pulse 'inc_pulse' when button is pressed
-    // --------------------------
-    wire inc_pulse;
-    debouncer u_db_inc (
-        .clk     (clk_100mhz),
-        .reset_n (reset_n),
-        .noisy   (btn_inc),
-        .pulse   (inc_pulse)
+    // ------------------------------------------------------------------------
+    // Debouncer (Lab 1 spec): btn_inc -> one-clock pulse @ 100 MHz
+    //   Ports per your reference: reset is ACTIVE-LOW and named `reset`
+    // ------------------------------------------------------------------------
+    wire inc_pulse_btn;
+    debouncer #(.DEBOUNCE_MAX(500_000)) u_db (
+        .clk        (clk_100mhz),
+        .reset      (reset_n),      // ACTIVE-LOW per your module
+        .button_in  (btn_inc),
+        .button_out (inc_pulse_btn) // 1 cycle @ 100 MHz
     );
 
-    // --------------------------
-    // Counter16 (two modes)
-    //   - Auto: clock it at 1 Hz and hold increment=1
-    //   - Manual: keep counter on fast clk and use debounced pulses
-    // Pick one behavior based on sw_mode
-    // --------------------------
-    wire [15:0] count16;
-
-    generate
-        if (1) begin : g_modes
-            // Two counters to keep logic simple and synchronous in each mode.
-            // Only one drives 'count16' at a time.
-            wire [15:0] count_auto, count_manual;
-
-            // AUTO path: 1Hz clock, increment always 1
-            counter16 u_cnt_auto (
-                .clk      (clk_1hz),
-                .reset    (reset_n),
-                .increment(1'b1),
-                .count    (count_auto)
-            );
-
-            // MANUAL path: run on fast clock, increment with debounced pulse
-            counter16 u_cnt_manual (
-                .clk      (clk_100mhz),
-                .reset    (reset_n),
-                .increment(inc_pulse),
-                .count    (count_manual)
-            );
-
-            assign count16 = (sw_mode == 1'b0) ? count_auto : count_manual;
+    // ------------------------------------------------------------------------
+    // AUTO increment pulse from 1 Hz clock:
+    //   - Synchronize 1 Hz square wave into 100 MHz domain
+    //   - Rising-edge detect to create a single-cycle pulse
+    //   (This matches the schematic "1 Hz" line through the MUX, but makes it
+    //    safe for your counter, which increments on posedge clk_100mhz.)
+    // ------------------------------------------------------------------------
+    reg hz_sync0, hz_sync1;
+    always @(posedge clk_100mhz or negedge reset_n) begin
+        if (!reset_n) begin
+            hz_sync0 <= 1'b0;
+            hz_sync1 <= 1'b0;
+        end else begin
+            hz_sync0 <= clk_1hz;
+            hz_sync1 <= hz_sync0;
         end
-    endgenerate
+    end
+    wire inc_pulse_1hz = hz_sync1 & ~hz_sync0;  // rising-edge pulse @ 100 MHz
 
-    // --------------------------
-    // Display control (external 1 kHz scan clock)
-    //   - Chooses which digit is enabled (AN) and which nibble to show
-    // --------------------------
+    // ------------------------------------------------------------------------
+    // Mode-select MUX for increment source (schematic’s MUX)
+    //   mode_select = 0 → AUTO (1 Hz pulses)
+    //   mode_select = 1 → MANUAL (debounced button pulses)
+    // ------------------------------------------------------------------------
+    wire increment_sel = (mode_select == 1'b0) ? inc_pulse_1hz : inc_pulse_btn;
+
+    // ------------------------------------------------------------------------
+    // Single 16-bit counter (Lab 1 counter, now 16-bit)
+    //   - Runs on 100 MHz clock
+    //   - Increments when increment_sel is 1 on a clk edge
+    // ------------------------------------------------------------------------
+    wire [15:0] count16;
+    counter16 u_counter16 (
+        .clk      (clk_100mhz),
+        .reset    (reset_n),     // ACTIVE-LOW (matches your counter’s port name)
+        .increment(increment_sel),
+        .count    (count16)
+    );
+
+    // ------------------------------------------------------------------------
+    // Display control (decoder-less): scans digits at 1 kHz and selects nibble
+    // ------------------------------------------------------------------------
     wire [3:0] active_nibble;
     display_control_scan u_scan (
         .clk_1khz (clk_1khz),
@@ -83,9 +87,9 @@ module top_part2 (
         .nibble   (active_nibble)
     );
 
-    // --------------------------
-    // 7-seg decode (active-LOW)
-    // --------------------------
+    // ------------------------------------------------------------------------
+    // Binary-to-7-seg decoder (active-LOW segments)
+    // ------------------------------------------------------------------------
     seven_segment_decoder u_dec (
         .hex_digit(active_nibble),
         .seg      (seg)
