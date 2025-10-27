@@ -5,7 +5,7 @@ module debouncer #(
     input  wire clk,
     input  wire reset,      
     input  wire button_in,
-    output reg button_out
+    output reg  button_out  
 );
 
     reg btn_sync1, btn_sync2;
@@ -21,34 +21,26 @@ module debouncer #(
 
     reg        debounced;
     reg [31:0] cnt;
-
-    localparam [31:0] DMAX_32 = DEBOUNCE_MAX;
+    localparam [31:0] DMAX_32 = (DEBOUNCE_MAX < 1) ? 32'd1 : DEBOUNCE_MAX; 
     always @(negedge clk) begin
         if (!reset) begin
             debounced <= 1'b0;
             cnt       <= 32'd0;
         end else begin
             if (btn_sync2 ^ debounced) begin
-                if (cnt == DMAX_32) begin
-                    debounced <= btn_sync2;
+                // count stable-difference time; accept when we've seen DMAX_32 edges
+                if (cnt >= (DMAX_32 - 1)) begin
+                    debounced <= btn_sync2; 
                     cnt       <= 32'd0;
                 end else begin
-                    cnt <= cnt + 32'd1;
+                    cnt <= cnt + 32'd1;    
                 end
             end else begin
-                cnt <= 32'd0;
+                cnt <= 32'd0;        
             end
         end
     end
 
     reg debounced_d;
     always @(negedge clk) begin
-        if (!reset) begin
-            debounced_d <= 1'b0;
-            button_out  <= 1'b0;
-        end else begin
-            debounced_d <= debounced;
-            button_out  <= debounced & ~debounced_d;  
-        end
-    end
-endmodule
+        if (!rese
