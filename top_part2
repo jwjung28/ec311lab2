@@ -1,0 +1,94 @@
+// ============================================================================
+// TOP: Part 2
+// - Instantiates: clock_divider_1hz, clock_divider_1khz, counter16,
+//                 display_control_scan, seven_segment_decoder, debouncer
+// - Notes:
+//   * reset_n is GLOBAL ACTIVE-LOW and fans into all modules.
+//   * SW0=0 → auto count at 1 Hz; SW0=1 → manual count via debounced button.
+//   * AN lines are active-LOW; seg outputs are active-LOW {CA..CG}.
+// ============================================================================
+
+module top_part2 (
+    input  wire        clk_100mhz,
+    input  wire        reset_n,     // GLOBAL ACTIVE-LOW reset (debounce externally if needed)
+    input  wire        btn_inc,     // pushbutton for manual increment (if SW0=1)
+    input  wire        sw_mode,     // SW0: 0=auto 1Hz, 1=manual button
+    output wire [3:0]  an,          // active-LOW digit enables: AN3..AN0
+    output wire [6:0]  seg          // active-LOW segments {CA,CB,CC,CD,CE,CF,CG}
+);
+
+    // --------------------------
+    // Derived clocks
+    // --------------------------
+    wire clk_1hz, clk_1khz;
+    clock_divider_1hz  u_div1 (.clk(clk_100mhz), .reset_n(reset_n), .clk_1hz(clk_1hz));
+    clock_divider_1khz u_div2 (.clk(clk_100mhz), .reset_n(reset_n), .clk_1khz(clk_1khz));
+
+    // --------------------------
+    // Debounce manual increment button (sync to 100 MHz)
+    // Produces a 1-cycle pulse 'inc_pulse' when button is pressed
+    // --------------------------
+    wire inc_pulse;
+    debouncer u_db_inc (
+        .clk     (clk_100mhz),
+        .reset_n (reset_n),
+        .noisy   (btn_inc),
+        .pulse   (inc_pulse)
+    );
+
+    // --------------------------
+    // Counter16 (two modes)
+    //   - Auto: clock it at 1 Hz and hold increment=1
+    //   - Manual: keep counter on fast clk and use debounced pulses
+    // Pick one behavior based on sw_mode
+    // --------------------------
+    wire [15:0] count16;
+
+    generate
+        if (1) begin : g_modes
+            // Two counters to keep logic simple and synchronous in each mode.
+            // Only one drives 'count16' at a time.
+            wire [15:0] count_auto, count_manual;
+
+            // AUTO path: 1Hz clock, increment always 1
+            counter16 u_cnt_auto (
+                .clk      (clk_1hz),
+                .reset    (reset_n),
+                .increment(1'b1),
+                .count    (count_auto)
+            );
+
+            // MANUAL path: run on fast clock, increment with debounced pulse
+            counter16 u_cnt_manual (
+                .clk      (clk_100mhz),
+                .reset    (reset_n),
+                .increment(inc_pulse),
+                .count    (count_manual)
+            );
+
+            assign count16 = (sw_mode == 1'b0) ? count_auto : count_manual;
+        end
+    endgenerate
+
+    // --------------------------
+    // Display control (external 1 kHz scan clock)
+    //   - Chooses which digit is enabled (AN) and which nibble to show
+    // --------------------------
+    wire [3:0] active_nibble;
+    display_control_scan u_scan (
+        .clk_1khz (clk_1khz),
+        .reset_n  (reset_n),
+        .value    (count16),
+        .an       (an),
+        .nibble   (active_nibble)
+    );
+
+    // --------------------------
+    // 7-seg decode (active-LOW)
+    // --------------------------
+    seven_segment_decoder u_dec (
+        .hex_digit(active_nibble),
+        .seg      (seg)
+    );
+
+endmodule
