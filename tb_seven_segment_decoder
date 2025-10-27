@@ -1,0 +1,73 @@
+`timescale 1ns/1ps
+
+module tb_seven_segment_decoder;
+
+  // DUT I/O
+  reg  [3:0] hex_digit;       // stimulus to the decoder
+  wire [6:0] seg;             // {CA,CB,CC,CD,CE,CF,CG}, active-LOW
+
+  // Instantiate DUT
+  seven_segment_decoder DUT (
+      .hex_digit(hex_digit),
+      .seg(seg)
+  );
+
+  // Expected truth table for a common-anode, active-LOW 7-seg
+  // Index = hex value 0..F; value = {CA,CB,CC,CD,CE,CF,CG}
+  reg [6:0] EXPECTED [0:15];
+
+  integer d;
+  integer errors = 0;
+
+  initial begin
+    // Initialize expected patterns (active-LOW)
+    EXPECTED[ 0] = 7'b0000001; // 0
+    EXPECTED[ 1] = 7'b1001111; // 1
+    EXPECTED[ 2] = 7'b0010010; // 2
+    EXPECTED[ 3] = 7'b0000110; // 3
+    EXPECTED[ 4] = 7'b1001100; // 4
+    EXPECTED[ 5] = 7'b0100100; // 5
+    EXPECTED[ 6] = 7'b0100000; // 6
+    EXPECTED[ 7] = 7'b0001111; // 7
+    EXPECTED[ 8] = 7'b0000000; // 8
+    EXPECTED[ 9] = 7'b0000100; // 9
+    EXPECTED[10] = 7'b0001000; // A
+    EXPECTED[11] = 7'b1100000; // b
+    EXPECTED[12] = 7'b0110001; // C
+    EXPECTED[13] = 7'b1000010; // d
+    EXPECTED[14] = 7'b0110000; // E
+    EXPECTED[15] = 7'b0111000; // F
+
+    // Sweep through all 16 hex digits
+    hex_digit = 4'h0;
+    #1; // small settle
+
+    for (d = 0; d < 16; d = d + 1) begin
+      hex_digit = d[3:0];
+      #2; // allow combinational settle time
+
+      // Optional: check for X/Z on outputs
+      if (^seg === 1'bx) begin
+        errors = errors + 1;
+        $display("X/Z detected for hex %h at t=%0t: seg=%b", d, $time, seg);
+      end
+      else if (seg !== EXPECTED[d]) begin
+        errors = errors + 1;
+        $display("MISMATCH hex %h at t=%0t: got seg=%b, exp=%b",
+                 d, $time, seg, EXPECTED[d]);
+      end
+      else begin
+        $display("OK hex %h -> seg=%b", d, seg);
+      end
+    end
+
+    // Summary
+    if (errors == 0)
+      $display("PASS: All 16 patterns matched.");
+    else
+      $display("FAIL: %0d mismatches.", errors);
+
+    #10 $finish;
+  end
+
+endmodule
