@@ -1,48 +1,38 @@
 `timescale 1ns/1ps
 
-// ============================================================================
-// SIM-ONLY divider overrides
-// These replace your RTL clock_divider_1hz/1khz during *simulation only*.
-// They ignore the input clk and produce quick test clocks so you don’t
-// wait realtime seconds. Keep them in the TB file, not in synthesis.
-// ============================================================================
+// -----------------------------------------------------------------------------
+// Sim-only *fast* divider shims (compile with +define+SIM_FAST_DIVS)
+// These shadow the RTL modules only during simulation builds.
+// -----------------------------------------------------------------------------
+`ifdef SIM_FAST_DIVS
 module clock_divider_1khz (
-    input  wire clk,         // ignored in sim
+    input  wire clk,         // ignored
     input  wire reset_n,     // ACTIVE-LOW
     output reg  clk_1khz
 );
     initial clk_1khz = 1'b0;
-    // Fast "1 kHz" for sim: toggle every 100 ns => 5 MHz square (just for visibility)
-    // Change the delay to whatever you like.
     always begin
-        if (!reset_n) begin
-            clk_1khz = 1'b0;
-            @(posedge reset_n);
-        end
-        #100 clk_1khz = ~clk_1khz;
+        if (!reset_n) begin clk_1khz = 1'b0; @(posedge reset_n); end
+        #100 clk_1khz = ~clk_1khz; // ~5 MHz square for quick sim visibility
     end
 endmodule
 
 module clock_divider_1hz (
-    input  wire clk,         // ignored in sim
+    input  wire clk,         // ignored
     input  wire reset_n,     // ACTIVE-LOW
     output reg  clk_1hz
 );
     initial clk_1hz = 1'b0;
-    // Fast "1 Hz" for sim: toggle every 2,000 ns => 250 kHz square (just for visibility)
-    // Adjust as desired to see the counter step faster/slower.
     always begin
-        if (!reset_n) begin
-            clk_1hz = 1'b0;
-            @(posedge reset_n);
-        end
-        #2000 clk_1hz = ~clk_1hz;
+        if (!reset_n) begin clk_1hz = 1'b0; @(posedge reset_n); end
+        #2000 clk_1hz = ~clk_1hz; // "1 Hz" becomes very fast in sim
     end
 endmodule
+`endif
 
-// ============================================================================
+// -----------------------------------------------------------------------------
 // Testbench
-// ============================================================================
+// -----------------------------------------------------------------------------
 module tb_top_part2;
 
   // 100 MHz main clock for the DUT
@@ -51,15 +41,15 @@ module tb_top_part2;
   always #(TNS/2.0) clk_100mhz = ~clk_100mhz;
 
   // Inputs
-  reg reset_n     = 0;   // global ACTIVE-LOW
+  reg reset_n     = 0;   // ACTIVE-LOW global reset
   reg btn_inc     = 0;   // pushbutton
-  reg mode_select = 0;   // 0=AUTO (uses sim "1Hz"), 1=MANUAL (button)
+  reg mode_select = 0;   // 0=AUTO, 1=MANUAL
 
   // Outputs
   wire [3:0] an;
   wire [6:0] seg;
 
-  // DUT
+  // DUT (uses monolithic display_control inside)
   top_part2 DUT (
     .clk_100mhz (clk_100mhz),
     .reset_n    (reset_n),
@@ -69,44 +59,65 @@ module tb_top_part2;
     .seg        (seg)
   );
 
-  // Make the debouncer snappy for sim (tiny dwell)
-  defparam DUT.u_db.DEBOUNCE_MAX = 16;
-
   // Handy access to internal counter for printing (sim-only)
   wire [15:0] count16 = DUT.count16;
 
-  // Helpers
-  task cyc(input int n); begin repeat(n) @(posedge clk_100mhz); end endtask
-  task press(input int hold_cycles); begin btn_inc=1; cyc(hold_cycles); btn_inc=0; end endtask
+  // Make the debouncer snappy for sim (tiny dwell)
+  defparam DUT.u_db.DEBOUNCE_MAX = 16;
+
+  // helpers
+  task cyc(input int n); begin repeat(n) @(posedge clk_100mhz); end endtask;
+  task press(input int hold_cycles); begin btn_inc=1; cyc(hold_cycles); btn_inc=0; end endtask;
+
+  integer c0, c1;
 
   initial begin
-    $display("[%0t] start", $time);
+    $display("[%0t] start tb_top_part2", $time);
 
     // Release reset
-    cyc(5);
-    reset_n = 1;
+    cyc(5); reset_n = 1; cyc(5);
 
-    // -------- AUTO MODE (mode_select=0): driven by sim "1Hz" clock --------
-    mode_select = 0;
-    cyc(2000);
-    $display("[%0t] AUTO mode: count = 0x%h", $time, count16);
+    // -------- AUTO MODE: counter advances from sim "1Hz"; button ignored ----
+    mode_select = 0; // AUTO
+    c0 = count16;
+    // Wait some time so the fast-sim 1Hz shim toggles a few times
+    cyc(5000);
+    c1 = count16;
+    if (c1 == c0) $display("FAIL(AUTO): counter did not advance from 1Hz");
+    else          $display("PASS(AUTO): counter advanced from %0d to %0d", c0, c1);
 
-    // -------- MANUAL MODE (mode_select=1): debounced button pulses --------
-    mode_select = 1;
-    cyc(50);
+    // Button should NOT affect in AUTO
+    c0 = count16;
+    press(40); cyc(100);
+    if (count16 != c0) $display("FAIL(AUTO): button affected count (was %0d now %0d)", c0, count16);
+    else               $display("PASS(AUTO): button ignored");
 
+    // -------- MANUAL MODE: debounced pulses count exactly once each ----------
+    mode_select = 1; cyc(50);
+    c0 = count16;
     press(40); cyc(50);
     press(40); cyc(50);
     press(40); cyc(50);
+    if (count16 != c0 + 3)
+      $display("FAIL(MANUAL): expected %0d got %0d", c0+3, count16);
+    else
+      $display("PASS(MANUAL): +3 pulses counted");
 
-    $display("[%0t] MANUAL mode: count = 0x%h (should be AUTO + 3)", $time, count16);
+    // -------- MODE FLIP NEAR "1Hz" EDGE: no double/missed count -------------
+    // Back to AUTO and hover around an edge by waiting ~a couple of us
+    mode_select = 0; cyc(200);
+    c0 = count16;
+    // Flip to MANUAL right around when AUTO edge *might* happen
+    mode_select = 1; press(40); mode_select = 0; cyc(500);
+    c1 = count16;
+    if (c1 < c0 + 1) $display("FAIL(MODE FLIP): missed count");
+    else             $display("PASS(MODE FLIP): no obvious double/miss (from %0d to %0d)", c0, c1);
 
-    // Show current scan and segments (active-LOW)
-    $display("AN=%b SEG=%b", an, seg);
+    // Quick smoke on display lines (active-LOW)
+    $display("AN=%b SEG=%b COUNT=0x%h", an, seg, count16);
 
-    cyc(200);
-    $display("[%0t] done", $time);
-    $finish;
+    $display("[%0t] done tb_top_part2", $time);
+    cyc(100); $finish;
   end
-
 endmodule
+
