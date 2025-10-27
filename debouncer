@@ -1,30 +1,21 @@
 // -----------------------------------------------------------------------------
-// Debouncer (counter-based, emits one-clock pulse on confirmed rising edge)
-// Follows Lab 2 Part 1 diagrams: counter runs while input != debounced state,
-// commits the new state once the counter hits MAX, then resets the counter.
-// - Inputs : clk (global clock), reset_n (active-low), button_in (raw button)
-// - Output : button_out (1-cycle pulse per *press* after debouncing)
-// Notes:
-//   * Parameterize DEBOUNCE_MAX for your board clock and desired settle time.
-//   * Includes a 2-FF synchronizer to tame metastability from the async button.
+// Debouncer (behavioral, counter-based, emits one-clock pulse on confirmed press)
+// Ports: clk, reset, button_in -> button_out (pulse)
+// Tweak DEBOUNCE_MAX for your clock/debounce window.
 // -----------------------------------------------------------------------------
 module debouncer #(
-    // For a 100 MHz clock and ~5 ms debounce time: 0.005 s * 100e6 = 500_000
-    // Tweak this to taste (bigger => slower but more robust).
-    parameter integer DEBOUNCE_MAX = 500_000
+    parameter integer DEBOUNCE_MAX = 500_000   // ~5 ms @ 100 MHz
 )(
     input  wire clk,
-    input  wire reset_n,      // global active-low reset (per lab)
+    input  wire reset,        // active-high synchronous system reset
     input  wire button_in,    // raw, asynchronous push-button
-    output wire button_out    // 1-clock pulse on debounced *press*
+    output reg  button_out    // 1-clock pulse on debounced rising edge
 );
 
-    // -----------------------------
-    // 1) Synchronize the async input
-    // -----------------------------
+    // 1) Synchronize the async input (2-FF sync)
     reg btn_sync1, btn_sync2;
-    always @(posedge clk or negedge reset_n) begin
-        if (!reset_n) begin
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
             btn_sync1 <= 1'b0;
             btn_sync2 <= 1'b0;
         end else begin
@@ -33,46 +24,41 @@ module debouncer #(
         end
     end
 
-    // -----------------------------------------
-    // 2) Debounce via "commit-on-timeout" logic
-    //    (Figure 1 algorithm: count while different,
-    //     commit when counter hits MAX, else reset)
-    // -----------------------------------------
-    reg        debounced;          // stable, debounced level
+    // 2) Debounce via counter: count while input != debounced; commit at MAX
+    reg        debounced;          // stable debounced level
     reg [31:0] cnt;                // wide enough for DEBOUNCE_MAX
 
-    wire different = (btn_sync2 ^ debounced);
-    wire at_max    = (cnt == DEBOUNCE_MAX[31:0]);
-
-    always @(posedge clk or negedge reset_n) begin
-        if (!reset_n) begin
-            debounced <= 1'b0;     // start unpressed; OK for active-high buttons
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            debounced <= 1'b0;     // assumes active-high button
             cnt       <= 32'd0;
         end else begin
-            if (different) begin
-                // Still seeing a difference: accumulate dwell time
-                if (!at_max) cnt <= cnt + 32'd1;
-                else begin
-                    // Stable difference lasted long enough: accept new state
-                    debounced <= btn_sync2;
-                    cnt       <= 32'd0;
+            if (btn_sync2 ^ debounced) begin
+                // input differs from debounced: accumulate dwell time
+                if (cnt == DEBOUNCE_MAX[31:0]) begin
+                    debounced <= btn_sync2;   // accept new stable state
+                    cnt       <= 32'd0;       // reset counter after commit
+                end else begin
+                    cnt <= cnt + 32'd1;
                 end
             end else begin
-                // No difference: keep counter at 0
+                // input matches debounced: keep counter at 0
                 cnt <= 32'd0;
             end
         end
     end
 
-    // ---------------------------------------------
-    // 3) One-shot pulse on *press* (rising edge only)
-    // ---------------------------------------------
-    reg debounced_d;  // 1-cycle delay of debounced level
-    always @(posedge clk or negedge reset_n) begin
-        if (!reset_n) debounced_d <= 1'b0;
-        else          debounced_d <= debounced;
+    // 3) One-shot pulse on rising edge of debounced
+    reg debounced_d;
+    always @(posedge clk or posedge reset) begin
+        if (reset) begin
+            debounced_d <= 1'b0;
+            button_out  <= 1'b0;
+        end else begin
+            debounced_d <= debounced;
+            button_out  <= debounced & ~debounced_d;  // 1 clk tick per press
+        end
     end
 
-    assign button_out = (debounced & ~debounced_d);  // 1 clk tick per push
-
 endmodule
+
