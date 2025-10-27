@@ -1,0 +1,21 @@
+// -----------------------------------------------------------------------------
+// 8-bit Counter (behavioral)
+// - Ports: clk, reset (ACTIVE-LOW), increment -> count[7:0]
+// - Spec: increment on posedge clk when increment==1
+//         async clear to 0 on negedge reset
+// -----------------------------------------------------------------------------
+module counter (
+    input  wire       clk,
+    input  wire       reset,      // ACTIVE-LOW global reset
+    input  wire       increment,
+    output reg  [7:0] count
+);
+    always @(posedge clk or negedge reset) begin
+        if (!reset) begin
+            count <= 8'h00;
+        end else begin
+            if (increment)
+                count <= count + 8'd1;  // wraps modulo 256
+        end
+    end
+endmodule
