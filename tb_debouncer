@@ -3,7 +3,7 @@ module tb_debouncer;
   localparam real    TNS  = 10.0;
   localparam integer DMAX = 8;
 
-  reg  clk = 0, reset = 0, button_in = 0;
+  reg  clk = 0, reset = 1, button_in = 0; 
   wire button_out;
 
   debouncer #(.DEBOUNCE_MAX(DMAX)) DUT (
@@ -12,8 +12,11 @@ module tb_debouncer;
 
   always #(TNS/2.0) clk = ~clk;
 
-  task rst_assert;   begin @(negedge clk); reset = 0; end endtask
-  task rst_deassert; begin @(negedge clk); reset = 1; end endtask
+  task rst_one_negedge; begin
+    reset = 0;        
+    @(negedge clk);
+    reset = 1;     
+  end endtask
 
   integer pulses = 0;
   always @(posedge clk) if (button_out) pulses <= pulses + 1;
@@ -30,7 +33,7 @@ module tb_debouncer;
   initial begin
     $display("[%0t] tb start", $time);
 
-    cyc(5); rst_deassert(); cyc(5);
+    cyc(2); rst_one_negedge(); cyc(3);
 
     cyc(20); chk(0, "T0 idle");
 
@@ -51,7 +54,7 @@ module tb_debouncer;
     chk(1, "T3 fast double-tap filtered");
 
     button_in = 1; cyc(DMAX + 10);
-    rst_assert();  cyc(3); rst_deassert();
+    rst_one_negedge();           // sampled on next negedge only
     cyc(5); button_in = 0; cyc(10);
     chk(1, "T4 reset during hold (no extra)");
 
