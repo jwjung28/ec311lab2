@@ -1,0 +1,50 @@
+`timescale 1ns/1ps
+module tb_counter;
+  localparam real TNS = 10.0;   // 100 MHz
+
+  reg  clk = 0;
+  reg  reset = 0;               // ACTIVE-LOW
+  reg  increment = 0;
+  wire [7:0] count;
+
+  // DUT
+  counter DUT (.clk(clk), .reset(reset), .increment(increment), .count(count));
+
+  // clock
+  always #(TNS/2.0) clk = ~clk;
+
+  // helper: wait N cycles
+  task cyc(input int n); begin repeat(n) @(posedge clk); end endtask
+
+  initial begin
+    $display("[%0t] start", $time);
+
+    // hold in reset, then release
+    cyc(3); reset = 1; cyc(2);
+
+    // T0: idle, no increment → count stays 0
+    cyc(5);
+    $display("T0: count=%0d (expect 0)", count);
+
+    // T1: single pulse → +1
+    increment = 1; cyc(1); increment = 0; cyc(2);
+    $display("T1: count=%0d (expect 1)", count);
+
+    // T2: hold high 5 cycles → +5
+    increment = 1; cyc(5); increment = 0; cyc(1);
+    $display("T2: count=%0d (expect 6)", count);
+
+    // T3: async reset while running → back to 0
+    reset = 0; #(1); // assert low (asynchronous)
+    reset = 1; cyc(1);
+    $display("T3: count=%0d (expect 0)", count);
+
+    // T4: a couple more pulses → +2
+    increment = 1; cyc(1); increment = 0; cyc(1);
+    increment = 1; cyc(1); increment = 0; cyc(1);
+    $display("T4: count=%0d (expect 2)", count);
+
+    $display("[%0t] done", $time);
+    cyc(2); $finish;
+  end
+endmodule
