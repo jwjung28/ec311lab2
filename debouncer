@@ -4,7 +4,8 @@ module debouncer #(
 )(
     input  wire clk,
     input  wire reset,      
-    input  wire button_in
+    input  wire button_in,
+    output reg button_out
 );
 
     reg btn_sync1, btn_sync2;
