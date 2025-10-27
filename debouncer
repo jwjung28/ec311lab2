@@ -1,46 +1,48 @@
 // -----------------------------------------------------------------------------
-// debouncer.v  (Behavioral, simple if/else only; one-clock pulse per confirmed press)
+// debouncer.v  (Behavioral, simple if/else; one-clock pulse per confirmed press)
 // - Ports: clk, reset (ACTIVE-LOW), button_in -> button_out
-// - Reset acts on negedge (falling edge) of reset
-// - DEBOUNCE_MAX kept tiny for sim; bump for real HW
+// - Async reset on negedge reset (falling edge)
+// - DEBOUNCE_MAX kept small for sim; increase for hardware
 // -----------------------------------------------------------------------------
 `timescale 1ns/1ps
 module debouncer #(
-    parameter integer DEBOUNCE_MAX = 4   // small for sim; enlarge for hardware
+    parameter integer CNT_W         = 8,   // counter width (2^CNT_W - 1 max)
+    parameter integer DEBOUNCE_MAX  = 4    // clocks button must be high to fire
 )(
     input  wire clk,
     input  wire reset,        // ACTIVE-LOW global reset (async)
     input  wire button_in,    // raw push-button
-    output reg  button_out    // 1-clock pulse after N stable high cycles
+    output reg  button_out    // 1-clock pulse after stable high
 );
-    // counter width sized from parameter; Vivado supports $clog2
-    reg [$clog2(DEBOUNCE_MAX):0] cnt;
-    reg armed;  // ensures single pulse per press
+
+    reg [CNT_W-1:0] cnt;
+    reg armed;   // ensures single pulse per press until release
 
     always @(posedge clk or negedge reset) begin
         if (!reset) begin
-            cnt        <= 0;
+            cnt        <= {CNT_W{1'b0}};
             button_out <= 1'b0;
             armed      <= 1'b1;
         end else begin
+            // released -> rearm and clear
             if (button_in == 1'b0) begin
-                // released: re-arm and clear
-                cnt        <= 0;
+                cnt        <= {CNT_W{1'b0}};
                 button_out <= 1'b0;
                 armed      <= 1'b1;
             end else begin
-                // button high
+                // button held high
                 if (armed) begin
-                    if (cnt == DEBOUNCE_MAX-1) begin
-                        button_out <= 1'b1;  // single-cycle pulse
-                        cnt        <= 0;
-                        armed      <= 1'b0;  // wait for release
+                    if (cnt >= (DEBOUNCE_MAX-1)) begin
+                        button_out <= 1'b1;          // fire single-cycle pulse
+                        cnt        <= {CNT_W{1'b0}}; // clear
+                        armed      <= 1'b0;          // wait for release
                     end else begin
                         cnt        <= cnt + 1'b1;
                         button_out <= 1'b0;
                     end
                 end else begin
-                    button_out <= 1'b0; // already fired; wait for release
+                    // already fired; keep output low until release
+                    button_out <= 1'b0;
                 end
             end
         end
