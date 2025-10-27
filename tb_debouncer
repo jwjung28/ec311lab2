@@ -1,43 +1,45 @@
 `timescale 1ns/1ps
-module tb_debouncer;
+module tb_debouncer_min;
   reg  clk = 0;
-  reg  reset = 1;         
+  reg  reset = 1;       // active-low external reset level
   reg  button_in = 0;
   wire button_out;
 
- 
   debouncer #(.DEBOUNCE_MAX(6)) dut (
     .clk(clk), .reset(reset), .button_in(button_in), .button_out(button_out)
   );
 
+  // 100 MHz
   always #5 clk = ~clk;
 
-  task reset_falling_edge_once;
+  // Create a falling edge on 'reset' that will be sampled at the next negedge clk
+  task reset_fall_once;
   begin
-    @(posedge clk); reset = 0;   
-    @(posedge clk); reset = 1;  
+    @(posedge clk); reset = 0;  // drive low (causes 1->0 transition)
+    @(posedge clk); reset = 1;  // back high; we only care about the fall
   end
   endtask
 
   initial begin
-   
-    reset_falling_edge_once();
+    // Power-up: make at least one reset fall so everything is known
+    reset_fall_once();
 
+    // Hold button high to start a debounce; then keep clearing the counter
     repeat (3) @(negedge clk);
     button_in = 1;
 
-   
-    reset_falling_edge_once();  // counter cleared here
+    reset_fall_once();  // counter cleared here
     repeat (2) @(negedge clk);
-    reset_falling_edge_once();  // cleared again
+    reset_fall_once();  // cleared again
     repeat (3) @(negedge clk);
-    reset_falling_edge_once();  // cleared again
+    reset_fall_once();  // cleared again
 
-    repeat (8) @(negedge clk);
+    // Now stop resetting; after 6 negedges, expect ONE pulse on button_out
+    repeat (10) @(negedge clk);
 
+    // Release
     button_in = 0;
-    repeat (8) @(negedge clk);
-
+    repeat (6) @(negedge clk);
     $finish;
   end
 endmodule
