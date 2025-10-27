@@ -1,59 +1,56 @@
-`timescale 1ns / 1ps
+`timescale 1ns/1ps
 module debouncer #(
-    parameter integer DEBOUNCE_MAX = 500_000
+    parameter integer DEBOUNCE_MAX = 500_000   // # of clock edges to confirm a change
 )(
-    input  wire clk,
-    input  wire reset,       
-    input  wire button_in,
-    output reg  button_out   
+    input  wire clk,            // global clock (fast vs human presses)
+    input  wire reset,          // ACTIVE-LOW reset (asynchronous)
+    input  wire button_in,      // raw push-button
+    output reg  button_out      // 1-cycle pulse on debounced rising edge
 );
-
-    reg rst_s0 = 1'b1;  
-    reg rst_s1 = 1'b1;
-    always @(negedge clk) begin
-        rst_s0 <= reset;   
-        rst_s1 <= rst_s0;  
-    end
-    wire rst_fall = (rst_s1 == 1'b1) && (rst_s0 == 1'b0); 
-
-    reg btn_sync1 = 1'b0, btn_sync2 = 1'b0;
-    always @(negedge clk) begin
-        if (rst_fall) begin
-            btn_sync1 <= 1'b0;
-            btn_sync2 <= 1'b0;
+    // 1) Two-flop synchronizer
+    reg btn_s1, btn_s2;
+    always @(posedge clk or negedge reset) begin
+        if (!reset) begin
+            btn_s1 <= 1'b0;
+            btn_s2 <= 1'b0;
         end else begin
-            btn_sync1 <= button_in;
-            btn_sync2 <= btn_sync1;
+            btn_s1 <= button_in;
+            btn_s2 <= btn_s1;
         end
     end
 
+    // 2) Debounce state and counter
+    reg        stable;          // debounced level (== output_exist in the diagram)
+    reg [31:0] cnt;             // deb_count
 
-    reg        debounced   = 1'b0;
-    reg        debounced_d = 1'b0;
-    reg [31:0] cnt         = 32'd0;
-
-    localparam [31:0] DMAX_32 = (DEBOUNCE_MAX < 1) ? 32'd1 : DEBOUNCE_MAX;
-
-    always @(negedge clk) begin
-        if (rst_fall) begin
-            debounced   <= 1'b0;
-            debounced_d <= 1'b0;
-            cnt         <= 32'd0;
-            button_out  <= 1'b0;
+    always @(posedge clk or negedge reset) begin
+        if (!reset) begin
+            stable <= 1'b0;
+            cnt    <= 32'd0;
         end else begin
-            if (btn_sync2 ^ debounced) begin
-                if (cnt >= (DMAX_32 - 1)) begin
-                    debounced <= btn_sync2;  // accept new level after threshold
-                    cnt       <= 32'd0;
+            if (btn_s2 ^ stable) begin
+                // input differs from debounced level -> count how long it stays different
+                if (cnt >= (DEBOUNCE_MAX-1)) begin
+                    stable <= btn_s2;      // accept new state
+                    cnt    <= 32'd0;       // reset counter
                 end else begin
-                    cnt <= cnt + 32'd1;
+                    cnt <= cnt + 32'd1;    // keep counting
                 end
             end else begin
-                cnt <= 32'd0;
+                cnt <= 32'd0;              // same as stable -> counter idle
             end
+        end
+    end
 
-            debounced_d <= debounced;
-            button_out  <= debounced & ~debounced_d;  
+    // 3) One-cycle pulse when debounced goes 0->1
+    reg stable_d;
+    always @(posedge clk or negedge reset) begin
+        if (!reset) begin
+            stable_d   <= 1'b0;
+            button_out <= 1'b0;
+        end else begin
+            stable_d   <= stable;
+            button_out <= stable & ~stable_d;  // pulse on rising edge of stable
         end
     end
 endmodule
