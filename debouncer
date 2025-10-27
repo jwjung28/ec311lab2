@@ -1,3 +1,4 @@
+`timescale 1ns / 1ps
 module debouncer #(
     parameter integer DEBOUNCE_MAX = 500_000  
 )(
