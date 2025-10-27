@@ -3,21 +3,22 @@ module debouncer #(
     parameter integer DEBOUNCE_MAX = 500_000
 )(
     input  wire clk,
-    input  wire reset,    
+    input  wire reset,        
     input  wire button_in,
-    output reg  button_out 
+    output reg  button_out    
 );
 
-    reg rstn_d, rstn_q;                  
+    // -- Edge-detect the 1->0 transition of reset, synchronized to negedge clk --
+    reg rst_s0, rst_s1;                
     always @(negedge clk) begin
-        rstn_d <= reset;                 
-        rstn_q <= rstn_d;                
+        rst_s0 <= reset;              
+        rst_s1 <= rst_s0;               
     end
-    wire rst_pulse = (rstn_q == 1'b1) && (rstn_d == 1'b0);
+    wire rst_fall = (rst_s1 == 1'b1) && (rst_s0 == 1'b0);  
 
     reg btn_sync1, btn_sync2;
     always @(negedge clk) begin
-        if (rst_pulse) begin
+        if (rst_fall) begin
             btn_sync1 <= 1'b0;
             btn_sync2 <= 1'b0;
         end else begin
@@ -31,28 +32,27 @@ module debouncer #(
     localparam [31:0] DMAX_32 = (DEBOUNCE_MAX < 1) ? 32'd1 : DEBOUNCE_MAX;
 
     always @(negedge clk) begin
-        if (rst_pulse) begin
-            debounced <= 1'b0;
-            cnt       <= 32'd0;
+        if (rst_fall) begin
+            cnt <= 32'd0;                    
         end else begin
             if (btn_sync2 ^ debounced) begin
                 if (cnt >= (DMAX_32 - 1)) begin
-                    debounced <= btn_sync2;
+                    debounced <= btn_sync2;  
                     cnt       <= 32'd0;
                 end else begin
                     cnt <= cnt + 32'd1;
                 end
             end else begin
-                cnt <= 32'd0;
+                cnt <= 32'd0;              
             end
         end
     end
 
     reg debounced_d;
     always @(negedge clk) begin
-        if (rst_pulse) begin
-            debounced_d <= 1'b0;
-            button_out  <= 1'b0;
+        if (rst_fall) begin
+            debounced_d <= debounced;  
+            button_out  <= 1'b0;      
         end else begin
             debounced_d <= debounced;
             button_out  <= debounced & ~debounced_d; 
