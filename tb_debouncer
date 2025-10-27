@@ -2,7 +2,7 @@
 
 module tb_debouncer;
   localparam real  TNS = 10.0;
-  localparam int   DMAX = 8;   
+  localparam integer   DMAX = 8;   
   reg  clk = 0, reset = 0, button_in = 0;
   wire button_out;
   debouncer #(.DEBOUNCE_MAX(DMAX)) DUT (
@@ -12,8 +12,8 @@ module tb_debouncer;
   integer pulses = 0;
   always @(posedge clk) if (button_out) pulses <= pulses + 1;
 
-  task cyc(input int n); begin repeat(n) @(posedge clk); end endtask
-  task chk(input int exp, input [127:0] tag);
+  task cyc(input integer n); begin repeat(n) @(posedge clk); end endtask
+  task chk(input integer exp, input [127:0] tag);
     begin
       if (pulses !== exp) $display("[%0t] FAIL %s exp=%0d saw=%0d", $time, tag, exp, pulses);
       else                $display("[%0t] PASS %s = %0d",          $time, tag, exp);
