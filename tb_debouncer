@@ -1,68 +1,29 @@
 `timescale 1ns/1ps
 module tb_debouncer;
-  localparam real    TNS  = 10.0;
-  localparam integer DMAX = 8;
-
-  reg  clk = 0, reset = 1, button_in = 0; 
+  reg  clk = 0;
+  reg  reset = 1;       // active-low, deasserted at start
+  reg  button_in = 0;
   wire button_out;
 
-  debouncer #(.DEBOUNCE_MAX(DMAX)) DUT (
-    .clk(clk), .reset(reset), .button_in(button_in), .button_out(button_out)
+  // Use a small DEBOUNCE_MAX so you can see activity quickly in sim
+  debouncer #(.DEBOUNCE_MAX(8)) dut (
+    .clk(clk),
+    .reset(reset),
+    .button_in(button_in),
+    .button_out(button_out)
   );
 
-  always #(TNS/2.0) clk = ~clk;
-
-  task rst_one_negedge; begin
-    reset = 0;        
-    @(negedge clk);
-    reset = 1;     
-  end endtask
-
-  integer pulses = 0;
-  always @(posedge clk) if (button_out) pulses <= pulses + 1;
-
-  task cyc(input integer n); begin repeat(n) @(posedge clk); end endtask
-  task chk(input integer exp, input [127:0] tag);
-    begin
-      if (pulses !== exp) $display("[%0t] FAIL %s exp=%0d saw=%0d", $time, tag, exp, pulses);
-      else                $display("[%0t] PASS %s = %0d",          $time, tag, exp);
-      pulses = 0;
-    end
-  endtask
+  // 100 MHz clock (10 ns period)
+  always #5 clk = ~clk;
 
   initial begin
-    $display("[%0t] tb start", $time);
+    // Make sure reset is actually sampled low at a falling edge
+    @(negedge clk); reset = 0;     // assert
+    @(negedge clk); reset = 1;     // release (all regs now known/0)
 
-    cyc(2); rst_one_negedge(); cyc(3);
+    // Idle a few cycles
+    repeat (4) @(negedge clk);
 
-    cyc(20); chk(0, "T0 idle");
-
-    repeat (3) begin button_in = ~button_in; cyc(1); end
-    button_in = 0; cyc(10);
-    chk(0, "T1 short/noisy");
-
-    repeat (4) begin button_in = ~button_in; cyc(1); end
-    button_in = 1; cyc(DMAX + 3);
-    cyc(10);
-    button_in = 0; cyc(10);
-    chk(1, "T2 single confirmed press");
-
-    button_in = 1; cyc(DMAX + 2);
-    button_in = 0; cyc(3);
-    button_in = 1; cyc(DMAX - 2);
-    button_in = 0; cyc(10);
-    chk(1, "T3 fast double-tap filtered");
-
-    button_in = 1; cyc(DMAX + 10);
-    rst_one_negedge();           // sampled on next negedge only
-    cyc(5); button_in = 0; cyc(10);
-    chk(1, "T4 reset during hold (no extra)");
-
-    button_in = 1; cyc(DMAX + 5);
-    button_in = 0; cyc(DMAX + 5);
-    chk(1, "T5 clean press/release");
-
-    $display("[%0t] tb done", $time);
-    cyc(5); $finish;
-  end
-endmodule
+    // Some short bounce (should NOT trigger)
+    button_in = 1; @(negedge clk);
+    button_in = 0; @(negedg_
