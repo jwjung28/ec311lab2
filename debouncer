@@ -1,14 +1,16 @@
 `timescale 1ns / 1ps
 module debouncer #(
-    parameter integer DEBOUNCE_MAX = 500_000  
+    parameter integer DEBOUNCE_MAX = 500_000
 )(
     input  wire clk,
-    input  wire reset,       
-    input  wire button_in,  
-    output reg  button_out  
+    input  wire reset,     
+    input  wire button_in,
+    output reg  button_out    
 );
+
+
     reg btn_sync1, btn_sync2;
-    always @(posedge clk or negedge reset) begin
+    always @(negedge clk or negedge reset) begin
         if (!reset) begin
             btn_sync1 <= 1'b0;
             btn_sync2 <= 1'b0;
@@ -18,29 +20,31 @@ module debouncer #(
         end
     end
 
+ 
+    reg        debounced;
+    reg [31:0] cnt;
 
-    reg        debounced; 
-    reg [31:0] cnt;               
-
-    always @(posedge clk or negedge reset) begin
+    localparam [31:0] DMAX_32 = 32'(DEBOUNCE_MAX);
+    always @(negedge clk or negedge reset) begin
         if (!reset) begin
-            debounced <= 1'b0;  
+            debounced <= 1'b0;
             cnt       <= 32'd0;
         end else begin
             if (btn_sync2 ^ debounced) begin
-                if (cnt == DEBOUNCE_MAX[31:0]) begin
-                    debounced <= btn_sync2;  
-                    cnt       <= 32'd0;      
+                if (cnt == DMAX_32) begin
+                    debounced <= btn_sync2;
+                    cnt       <= 32'd0;
                 end else begin
-                    cnt <= cnt + 32'd1; 
+                    cnt <= cnt + 32'd1;
                 end
             end else begin
-                cnt <= 32'd0;  
+                cnt <= 32'd0;
             end
         end
     end
+
     reg debounced_d;
-    always @(posedge clk or negedge reset) begin
+    always @(negedge clk or negedge reset) begin
         if (!reset) begin
             debounced_d <= 1'b0;
             button_out  <= 1'b0;
