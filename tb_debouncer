@@ -1,7 +1,7 @@
 `timescale 1ns/1ps
 module tb_debouncer;
   reg  clk = 0;
-  reg  reset = 1;       // active-low, deasserted at start
+  reg  reset = 1;      
   reg  button_in = 0;
   wire button_out;
 
@@ -26,4 +26,19 @@ module tb_debouncer;
 
     // Some short bounce (should NOT trigger)
     button_in = 1; @(negedge clk);
-    button_in = 0; @(negedg_
+    button_in = 0; @(negedge clk);
+    button_in = 1; @(negedge clk);
+    button_in = 0; repeat (3) @(negedge clk);
+
+    // Valid press: hold high >= DEBOUNCE_MAX negedges (>= 8 here)
+    button_in = 1; repeat (10) @(negedge clk);
+    // Release
+    button_in = 0; repeat (10) @(negedge clk);
+
+    // Another clean press/release
+    button_in = 1; repeat (10) @(negedge clk);
+    button_in = 0; repeat (10) @(negedge clk);
+
+    $finish;
+  end
+endmodule
