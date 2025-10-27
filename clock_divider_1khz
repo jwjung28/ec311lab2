@@ -1,0 +1,29 @@
+// -----------------------------------------------------------------------------
+// clock_divider_1khz
+// - Input:  100 MHz clock
+// - Output: 1 kHz clock (50% duty cycle)
+// - Reset:  active-low asynchronous
+// -----------------------------------------------------------------------------
+module clock_divider_1khz (
+    input  wire clk,        // 100 MHz system clock
+    input  wire reset_n,    // ACTIVE-LOW async reset
+    output reg  clk_1khz    // 1 kHz output clock
+);
+    localparam integer HALF = 50_000;          // 100 MHz ÷ (1 kHz×2) = 50 k cycles
+    localparam integer CTRW = $clog2(HALF);
+    reg [CTRW-1:0] ctr;
+
+    always @(posedge clk or negedge reset_n) begin
+        if (!reset_n) begin
+            ctr      <= {CTRW{1'b0}};
+            clk_1khz <= 1'b0;
+        end else begin
+            if (ctr == HALF - 1) begin
+                ctr      <= {CTRW{1'b0}};
+                clk_1khz <= ~clk_1khz;          // toggle every half-period
+            end else begin
+                ctr <= ctr + 1'b1;
+            end
+        end
+    end
+endmodule
