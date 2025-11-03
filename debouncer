@@ -1,50 +1,42 @@
-// -----------------------------------------------------------------------------
-// debouncer.v  (Behavioral, simple if/else; one-clock pulse per confirmed press)
-// - Ports: clk, reset (ACTIVE-LOW), button_in -> button_out
-// - Async reset on negedge reset (falling edge)
-// - DEBOUNCE_MAX kept small for sim; increase for hardware
-// -----------------------------------------------------------------------------
-`timescale 1ns/1ps
 module debouncer #(
-    parameter integer CNT_W         = 8,   // counter width (2^CNT_W - 1 max)
-    parameter integer DEBOUNCE_MAX  = 4    // clocks button must be high to fire
+    parameter integer COUNT_MAX = 8
 )(
     input  wire clk,
-    input  wire reset,        // ACTIVE-LOW global reset (async)
-    input  wire button_in,    // raw push-button
-    output reg  button_out    // 1-clock pulse after stable high
+    input  wire reset,      // triggers on negedge (1->0)
+    input  wire button_in,
+    output reg  button_out
 );
 
-    reg [CNT_W-1:0] cnt;
-    reg armed;   // ensures single pulse per press until release
+    reg [$clog2(COUNT_MAX)-1:0] count = 0;
+    reg prev_in = 0;
 
     always @(posedge clk or negedge reset) begin
         if (!reset) begin
-            cnt        <= {CNT_W{1'b0}};
-            button_out <= 1'b0;
-            armed      <= 1'b1;
+            count      <= 0;
+            prev_in    <= 0;
+            button_out <= 0;
         end else begin
-            // released -> rearm and clear
-            if (button_in == 1'b0) begin
-                cnt        <= {CNT_W{1'b0}};
-                button_out <= 1'b0;
-                armed      <= 1'b1;
+            // If button changed, restart counter
+            if (button_in != prev_in) begin
+                prev_in <= button_in;
+                count   <= 0;
             end else begin
-                // button held high
-                if (armed) begin
-                    if (cnt >= (DEBOUNCE_MAX-1)) begin
-                        button_out <= 1'b1;          // fire single-cycle pulse
-                        cnt        <= {CNT_W{1'b0}}; // clear
-                        armed      <= 1'b0;          // wait for release
-                    end else begin
-                        cnt        <= cnt + 1'b1;
-                        button_out <= 1'b0;
-                    end
-                end else begin
-                    // already fired; keep output low until release
-                    button_out <= 1'b0;
-                end
+                // Input stable -> increment counter
+                if (count < COUNT_MAX-1)
+                    count <= count + 1;
+                else
+                    count <= count;
             end
+
+            // Update output after stable input held long enough
+            if (count == COUNT_MAX - 1)
+                button_out <= button_in;
+
+            // If button released (goes low), turn off immediately
+            if (button_in == 0)
+                button_out <= 0;
         end
     end
+
 endmodule
+
