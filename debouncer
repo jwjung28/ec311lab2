@@ -1,14 +1,3 @@
-`timescale 1ns/1ps
-`default_nettype none
-// -----------------------------------------------------------------------------
-// Debouncer (as provided) — behavior intentionally unchanged
-// Notes:
-// - Reset is described as active-low (triggers on negedge), and the logic below
-//   uses `if (reset)` exactly as in the original (i.e., no polarity fix).
-// - Counter increments while input is stable; output updates after COUNT_MAX-1.
-// - Output is forced LOW immediately when button_in == 0.
-// - Structure, ordering, and conditions preserved for identical behavior.
-// -----------------------------------------------------------------------------
 module debouncer #(
     parameter integer COUNT_MAX = 8
 )(
@@ -18,11 +7,11 @@ module debouncer #(
     output reg  button_out
 );
 
-    reg [$clog2(COUNT_MAX)-1:0] count   = 0;
-    reg                         prev_in = 0;
+    reg [$clog2(COUNT_MAX)-1:0] count = 0;
+    reg prev_in = 0;
 
     always @(posedge clk or negedge reset) begin
-        if (reset) begin
+        if (!reset) begin
             count      <= 0;
             prev_in    <= 0;
             button_out <= 0;
@@ -50,4 +39,3 @@ module debouncer #(
     end
 
 endmodule
-`default_nettype wire
