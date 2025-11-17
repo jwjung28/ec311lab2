@@ -1,91 +1,105 @@
 // ============================================================================
-// TOP: Part 2 (schematic-accurate, uses monolithic display_control)
-// - Uses: clock_divider_1hz, clock_divider_1khz, debouncer, counter16,
-//         display_control (this one drives {an, seg} itself)
-// - Global reset is ACTIVE-LOW and fans into all blocks.
-// - One counter; a MUX selects increment source (manual vs 1Hz auto pulse).
+// top_part2
+// - Instantiates: clock_divider_1hz, clock_divider_1khz, debouncer (new API),
+//                 counter16 (your version), display_control (decoder-less),
+//                 seven_segment_decoder
+// - Global reset is ACTIVE-LOW (reset_n).
+// - Mode: 0 = AUTO (1 Hz), 1 = MANUAL (button pulse)
 // ============================================================================
 module top_part2 (
     input  wire        clk_100mhz,
-    input  wire        reset_n,     // GLOBAL ACTIVE-LOW reset
-    input  wire        btn_inc,     // pushbutton (increment)
-    input  wire        mode_select, // 0 = AUTO (1 Hz), 1 = MANUAL (button)
-    output wire [3:0]  an,          // active-LOW digit selects AN3..AN0
-    output wire [6:0]  seg          // active-LOW {CA,CB,CC,CD,CE,CF,CG}
+    input  wire        reset_n,      // GLOBAL ACTIVE-LOW reset
+    input  wire        btn_inc,      // increment pushbutton
+    input  wire        mode_select,  // 0=AUTO 1Hz, 1=MANUAL button
+    output wire [3:0]  an,           // active-LOW digit enables
+    output wire [6:0]  seg           // active-LOW {CA,CB,CC,CD,CE,CF,CG}
 );
 
-    // ------------------------------------------------------------------------
+    // -----------------------------
     // Clock dividers
-    //   - 1 kHz: display scan
-    //   - 1  Hz: auto-increment source (edge-detected into a 100 MHz pulse)
-    // ------------------------------------------------------------------------
+    // -----------------------------
     wire clk_1khz, clk_1hz;
-    clock_divider_1khz u_div_khz (.clk(clk_100mhz), .reset_n(reset_n), .clk_1khz(clk_1khz));
-    clock_divider_1hz  u_div_hz  (.clk(clk_100mhz), .reset_n(reset_n), .clk_1hz (clk_1hz));
-
-    // ------------------------------------------------------------------------
-    // Debouncer (btn_inc -> one-clock pulse @ 100 MHz)
-    // ------------------------------------------------------------------------
-    wire inc_pulse_btn;
-    debouncer #(.DEBOUNCE_MAX(500_000)) u_db (
-        .clk        (clk_100mhz),
-        .reset      (reset_n),      // ACTIVE-LOW per debouncer port
-        .button_in  (btn_inc),
-        .button_out (inc_pulse_btn) // 1 cycle @ 100 MHz
+    clock_divider_1khz u_div_khz (
+        .clk     (clk_100mhz),
+        .reset_n (reset_n),
+        .clk_1khz(clk_1khz)
     );
 
-    // ------------------------------------------------------------------------
-    // AUTO increment pulse from 1 Hz clock:
-    //   - Sync 1 Hz into 100 MHz domain
-    //   - Rising-edge detect to create a single-cycle pulse
-    // ------------------------------------------------------------------------
-    reg hz_sync0, hz_sync1;
+    clock_divider_1hz u_div_hz (
+        .clk     (clk_100mhz),
+        .reset_n (reset_n),
+        .clk_1hz (clk_1hz)
+    );
+
+    // -----------------------------
+    // Debouncer (NEW API)
+    //   - outputs a 1-cycle 'pulse' at 100 MHz per debounced press
+    //   - ACTIVE-LOW async reset: rst_n
+    //   - If your button is active-low, set ACTIVE_LOW=1
+    // -----------------------------
+    wire inc_pulse_btn;
+    debouncer #(
+        .CNT_BITS(20),      // ~10 ms @100 MHz (shrink for sim)
+        .ACTIVE_LOW(0)      // set to 1 if your BTN is active-low
+    ) u_db (
+        .clk   (clk_100mhz),
+        .rst_n (reset_n),
+        .btn_in(btn_inc),
+        .pulse (inc_pulse_btn)
+    );
+
+    // -----------------------------
+    // AUTO 1 Hz → make a 1-cycle pulse (rising-edge detect)
+    // clk_1hz is generated from clk_100mhz, so it is synchronous.
+    // -----------------------------
+    reg hz_d0, hz_d1;
     always @(posedge clk_100mhz or negedge reset_n) begin
         if (!reset_n) begin
-            hz_sync0 <= 1'b0;
-            hz_sync1 <= 1'b0;
+            hz_d0 <= 1'b0;
+            hz_d1 <= 1'b0;
         end else begin
-            hz_sync0 <= clk_1hz;
-            hz_sync1 <= hz_sync0;
+            hz_d0 <= clk_1hz;
+            hz_d1 <= hz_d0;
         end
     end
+    wire inc_pulse_1hz = hz_d0 & ~hz_d1; // 1-cycle at 100 MHz each second
 
-    // Rising-edge pulse when 1 Hz goes 0->1 in the 100 MHz domain
-    wire inc_pulse_1hz = hz_sync0 & ~hz_sync1;
+    // -----------------------------
+    // Select increment source (schematic MUX)
+    // -----------------------------
+    wire increment_sel = (mode_select) ? inc_pulse_btn : inc_pulse_1hz;
 
-    // ------------------------------------------------------------------------
-    // Mode-select MUX for increment source (schematic’s MUX)
-    //   mode_select = 0 → AUTO (1 Hz pulses)
-    //   mode_select = 1 → MANUAL (debounced button pulses)
-    // ------------------------------------------------------------------------
-    wire increment_sel = (mode_select == 1'b0) ? inc_pulse_1hz : inc_pulse_btn;
-
-    // ------------------------------------------------------------------------
-    // Single 16-bit counter
-    // ------------------------------------------------------------------------
+    // -----------------------------
+    // 16-bit counter (your module uses ACTIVE-HIGH reset)
+    // -----------------------------
     wire [15:0] count16;
     counter16 u_counter16 (
         .clk      (clk_100mhz),
-        .reset    (reset_n),     // ACTIVE-LOW
+        .reset    (~reset_n),     // invert: your counter expects active-HIGH
         .increment(increment_sel),
         .count    (count16)
     );
 
-    // ------------------------------------------------------------------------
-    // Monolithic display controller:
-    // - takes full 16-bit value
-    // - scans digits at ~1 kHz
-    // - internally decodes to 7-seg (active-LOW)
-    // ------------------------------------------------------------------------
-    display_control #(
-        .CLK_HZ   (100_000_000),
-        .DIGIT_HZ (1_000)
-    ) u_disp (
-        .clk    (clk_100mhz),
-        .reset_n(reset_n),
-        .value  (count16),
-        .an     (an),
-        .seg    (seg)
+    // -----------------------------
+    // Display control (decoder-less): drives AN, outputs nibble
+    //   NOTE: ensure your display_control does NOT instantiate a decoder.
+    //         It should output 'nib' as below.
+    // -----------------------------
+    wire [3:0] nib;
+    display_control u_disp (
+        .clk_scan (clk_1khz),
+        .rst_n    (reset_n),
+        .value    (count16),
+        .an       (an),
+        .nib      (nib)
+    );
+
+    // -----------------------------
+    // Seven-segment decoder (separate module)
+    // -----------------------------
+    seven_segment_decoder u_dec (
+        .hex_digit(nib),
+        .seg      (seg)
     );
 
 endmodule
